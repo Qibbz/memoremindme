@@ -46,6 +46,10 @@ def get_db_connection():
 def init_db():
     """Створення таблиць при першому запуску"""
 
+    # Додай цей рядок на початок
+    print(f"🔍 DATABASE_URL: {'є' if os.getenv('DATABASE_URL') else 'немає'}")
+    print(f"🔍 USE_POSTGRES: {USE_POSTGRES}")
+
     conn = get_db_connection()
     cursor = conn.cursor()
 

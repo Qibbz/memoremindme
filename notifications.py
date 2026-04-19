@@ -15,13 +15,9 @@ logger = logging.getLogger(__name__)
 async def check_and_send_reminders(context):
     """
     Перевіряє нагадування на сьогодні і надсилає їх
-    Викликається о 6:00 UTC (~8:00 за Києвом взимку, ~9:00 влітку)
-
-    Для особистих нагадувань — відправляємо автору
-    Для групових нагадувань — відправляємо ВСІМ учасникам групи
-
-    Нагадування об'єднуються в одне повідомлення (макс 10 на повідомлення)
     """
+    from database import USE_POSTGRES, get_db_connection
+
     bot = context.bot
     today = date.today()
     logger.info(f"🔍 Перевірка нагадувань на {today}")
@@ -29,65 +25,80 @@ async def check_and_send_reminders(context):
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # Вибираємо placeholder залежно від бази
+    ph = "%s" if USE_POSTGRES else "?"
+
     try:
         # === ЗБИРАЄМО ВСІ НАГАДУВАННЯ ДЛЯ КОЖНОГО КОРИСТУВАЧА ===
-
-        # Словник: user_id -> список нагадувань
         user_reminders = {}
 
         # 1. ОСОБИСТІ НАГАДУВАННЯ (group_id IS NULL)
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT r.*, u.chat_id, NULL as group_name, u.user_id as receiver_id
             FROM reminders r
             JOIN users u ON r.user_id = u.user_id
-            WHERE r.next_date = ?
+            WHERE r.next_date = {ph}
             AND r.group_id IS NULL
-            AND u.is_authorized = 1
+            AND u.is_authorized = {'TRUE' if USE_POSTGRES else '1'}
         """, (today,))
 
         for row in cursor.fetchall():
-            user_id = row['receiver_id']
+            if USE_POSTGRES:
+                # PostgreSQL повертає tuple, конвертуємо в dict
+                columns = [desc[0] for desc in cursor.description]
+                row_dict = dict(zip(columns, row))
+            else:
+                row_dict = dict(row)
+
+            user_id = row_dict['receiver_id']
             if user_id not in user_reminders:
                 user_reminders[user_id] = {
-                    'chat_id': row['chat_id'],
+                    'chat_id': row_dict['chat_id'],
                     'reminders': []
                 }
             user_reminders[user_id]['reminders'].append({
-                'text': row['text'],
-                'type': row['type'],
+                'text': row_dict['text'],
+                'type': row_dict['type'],
                 'group_name': None,
                 'is_personal': True,
                 'date_str': None
             })
 
-        # 2. ГРУПОВІ НАГАДУВАННЯ (group_id IS NOT NULL)
-        # Спочатку знаходимо всі групові нагадування
-        cursor.execute("""
+        # 2. ГРУПОВІ НАГАДУВАННЯ
+        cursor.execute(f"""
             SELECT r.*, g.name as group_name, g.group_id
             FROM reminders r
             JOIN groups g ON r.group_id = g.group_id
-            WHERE r.next_date = ?
+            WHERE r.next_date = {ph}
             AND r.group_id IS NOT NULL
         """, (today,))
 
         group_reminders = cursor.fetchall()
 
-        # Для кожного групового нагадування знаходимо всіх учасників
         for reminder in group_reminders:
+            if USE_POSTGRES:
+                columns = [desc[0] for desc in cursor.description]
+                reminder = dict(zip(columns, reminder))
+            else:
+                reminder = dict(reminder)
+
             group_id = reminder['group_id']
 
-            # Знаходимо всіх учасників групи
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT u.user_id, u.chat_id
                 FROM users u
                 JOIN group_members gm ON u.user_id = gm.user_id
-                WHERE gm.group_id = ? AND u.is_authorized = 1
+                WHERE gm.group_id = {ph} AND u.is_authorized = {'TRUE' if USE_POSTGRES else '1'}
             """, (group_id,))
 
             members = cursor.fetchall()
 
-            # Додаємо нагадування кожному учаснику
             for member in members:
+                if USE_POSTGRES:
+                    member = dict(zip([desc[0] for desc in cursor.description], member))
+                else:
+                    member = dict(member)
+
                 user_id = member['user_id']
                 if user_id not in user_reminders:
                     user_reminders[user_id] = {
@@ -102,7 +113,7 @@ async def check_and_send_reminders(context):
                     'date_str': None
                 })
 
-        # === ВІДПРАВЛЯЄМО ОБ'ЄДНАНІ ПОВІДОМЛЕННЯ ===
+        # === ВІДПРАВЛЯЄМО ===
         logger.info(f"📋 Знайдено нагадування для {len(user_reminders)} користувачів")
 
         for user_id, data in user_reminders.items():
@@ -112,26 +123,32 @@ async def check_and_send_reminders(context):
             except Exception as e:
                 logger.error(f"❌ Помилка відправки нагадувань користувачу {user_id}: {e}")
 
-        # === ОНОВЛЮЄМО ДАТИ НАГАДУВАНЬ (ТІЛЬКИ ОДИН РАЗ!) ===
-        # Особисті нагадування
-        cursor.execute("""
+        # === ОНОВЛЮЄМО ДАТИ ===
+        cursor.execute(f"""
             SELECT r.* FROM reminders r
             JOIN users u ON r.user_id = u.user_id
-            WHERE r.next_date = ? AND r.group_id IS NULL AND u.is_authorized = 1
+            WHERE r.next_date = {ph} AND r.group_id IS NULL AND u.is_authorized = {'TRUE' if USE_POSTGRES else '1'}
         """, (today,))
 
         for reminder in cursor.fetchall():
-            await update_reminder_date(cursor, conn, reminder)
+            if USE_POSTGRES:
+                reminder = dict(zip([desc[0] for desc in cursor.description], reminder))
+            else:
+                reminder = dict(reminder)
+            await update_reminder_date(cursor, conn, reminder, USE_POSTGRES)
 
-        # Групові нагадування (оновлюємо тільки один раз!)
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT r.* FROM reminders r
             JOIN groups g ON r.group_id = g.group_id
-            WHERE r.next_date = ? AND r.group_id IS NOT NULL
+            WHERE r.next_date = {ph} AND r.group_id IS NOT NULL
         """, (today,))
 
         for reminder in cursor.fetchall():
-            await update_reminder_date(cursor, conn, reminder)
+            if USE_POSTGRES:
+                reminder = dict(zip([desc[0] for desc in cursor.description], reminder))
+            else:
+                reminder = dict(reminder)
+            await update_reminder_date(cursor, conn, reminder, USE_POSTGRES)
 
     finally:
         conn.close()
@@ -203,34 +220,36 @@ async def send_combined_reminders(bot, chat_id, reminders, title, date_obj=None,
             logger.error(f"❌ Не вдалося надіслати: {e}")
 
 
-async def update_reminder_date(cursor, conn, reminder):
+async def update_reminder_date(cursor, conn, reminder, use_postgres=False):
     """
     Оновлює дату нагадування (переносить на наступний раз)
     """
+    ph = "%s" if use_postgres else "?"
+
     if reminder['type'] == 'once':
         cursor.execute(
-            "DELETE FROM reminders WHERE reminder_id = ?",
+            f"DELETE FROM reminders WHERE reminder_id = {ph}",
             (reminder['reminder_id'],)
         )
         logger.info(f"🗑️ Разове нагадування {reminder['reminder_id']} видалено")
 
     elif reminder['type'] == 'monthly':
-        current_date = date.fromisoformat(reminder['next_date'])
+        current_date = date.fromisoformat(str(reminder['next_date']))
         original_day = reminder['original_day'] or current_date.day
         next_date = get_next_month_date(current_date, original_day)
 
         cursor.execute(
-            "UPDATE reminders SET next_date = ? WHERE reminder_id = ?",
+            f"UPDATE reminders SET next_date = {ph} WHERE reminder_id = {ph}",
             (next_date, reminder['reminder_id'])
         )
         logger.info(f"🔄 Щомісячне нагадування {reminder['reminder_id']} перенесено на {next_date}")
 
     elif reminder['type'] == 'yearly':
-        current_date = date.fromisoformat(reminder['next_date'])
+        current_date = date.fromisoformat(str(reminder['next_date']))
         next_date = get_next_year_date(current_date)
 
         cursor.execute(
-            "UPDATE reminders SET next_date = ? WHERE reminder_id = ?",
+            f"UPDATE reminders SET next_date = {ph} WHERE reminder_id = {ph}",
             (next_date, reminder['reminder_id'])
         )
         logger.info(f"📅 Щорічне нагадування {reminder['reminder_id']} перенесено на {next_date}")
