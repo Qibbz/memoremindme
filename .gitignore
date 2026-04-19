@@ -22,3 +22,11 @@ env/
 
 # Логи
 *.log
+
+# macOS системні файли
+.DS_Store
+**/.DS_Store
+
+# Тимчасові файли
+repomix-output.xml
+*.xml
