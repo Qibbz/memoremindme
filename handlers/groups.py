@@ -604,14 +604,6 @@ async def cancel_delete_group(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def group_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показ інформації про групу"""
     query = update.callback_query
-    user_id = update.effective_user.id
-
-    # Антиспам
-    if not check_cooldown(user_id, "group_info", cooldown_seconds=2):
-        await query.answer("⏱ Занадто швидко!", show_alert=False)
-        return
-
-    await query.answer()
 
     # Отримуємо ID групи з callback_data (формат: group_info_123)
     data = query.data
@@ -619,13 +611,20 @@ async def group_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
+    # Антиспам
+    if not check_cooldown(user_id, f"group_info_{group_id}", cooldown_seconds=2):
+        await query.answer("⏱ Занадто швидко!", show_alert=False)
+        return
+
+    await query.answer()
+
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        # Перевіряємо чи користувач є в групі
+        # Перевіряємо чи група існує і чи користувач є в групі
         cursor.execute("""
-            SELECT g.name, g.code, gm.is_admin
+            SELECT g.group_id, g.name, g.code, gm.is_admin
             FROM groups g
             JOIN group_members gm ON g.group_id = gm.group_id
             WHERE g.group_id = ? AND gm.user_id = ?
@@ -652,7 +651,7 @@ async def group_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             FROM users u
             JOIN group_members gm ON u.user_id = gm.user_id
             WHERE gm.group_id = ?
-            ORDER BY gm.is_admin DESC, u.first_name
+            ORDER BY gm.is_admin DESC, u.first_name, u.username
         """, (group_id,))
 
         members = cursor.fetchall()
@@ -675,14 +674,14 @@ async def group_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             members_list.append(f"{idx}. {name}{admin_mark}")
 
         # Формуємо повідомлення
-        admin_status = "Так" if membership['is_admin'] else "Ні"
+        admin_status = "✅ Так" if membership['is_admin'] else "❌ Ні"
 
         message = (
             f"👥 <b>Група: {membership['name']}</b>\n\n"
             f"🔑 <b>Код для запрошення:</b> <code>{membership['code']}</code>\n"
             f"👤 <b>Учасників:</b> {member_count}\n"
             f"👑 <b>Ви адмін:</b> {admin_status}\n\n"
-            f"<b>Список учасників:</b>\n"
+            f"<b>📋 Список учасників:</b>\n"
         )
 
         # Додаємо список учасників

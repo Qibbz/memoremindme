@@ -434,6 +434,10 @@ def main():
     for handler in groups_handlers:
         application.add_handler(handler)
 
+    # 4.1 Обробник інформації про групу (окремо, бо не в groups_handlers)
+    from handlers.groups import group_info
+    application.add_handler(CallbackQueryHandler(group_info, pattern="^group_info_"))
+
     # 5. Обробники видалення (додаємо перед загальним обробником)
     for handler in delete_handlers:
         application.add_handler(handler)
