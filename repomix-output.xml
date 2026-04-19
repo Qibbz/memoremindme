@@ -1,0 +1,4471 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+handlers/
+  __init__.py
+  backup.py
+  delete.py
+  edit.py
+  groups.py
+  list.py
+  reminders.py
+__init__.py
+.gitignore
+config.py
+database.py
+debug_main.py
+main.py
+notifications.py
+requirements.txt
+test_imports.py
+test_natural_language.py
+utils.py
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="handlers/__init__.py">
+# handlers/__init__.py
+# Порожній файл для позначення пакету
+</file>
+
+<file path="handlers/backup.py">
+# handlers/backup.py - Автоматичний backup бази даних
+
+import os
+import logging
+from datetime import datetime
+from telegram import Update
+from telegram.ext import ContextTypes, CallbackQueryHandler
+
+from config import ADMIN_ID, DB_PATH
+
+logger = logging.getLogger(__name__)
+
+
+async def auto_backup_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Щоденний автоматичний backup бази даних
+    Відправляє файл .db адміністратору о 6:30 UTC
+    """
+    try:
+        # Перевіряємо чи існує файл БД
+        if not os.path.exists(DB_PATH):
+            logger.error(f"❌ Файл БД не знайдено: {DB_PATH}")
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 <b>Помилка backup!</b>\n\n"
+                     f"Файл бази даних не знайдено: {DB_PATH}\n"
+                     f"Час: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                parse_mode="HTML"
+            )
+            return
+
+        # Отримуємо інформацію про файл
+        file_size = os.path.getsize(DB_PATH)
+        file_size_mb = file_size / (1024 * 1024)
+        current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+        logger.info(f"📦 Створення backup: {DB_PATH} ({file_size_mb:.2f} MB)")
+
+        # Відправляємо файл адміністратору
+        with open(DB_PATH, 'rb') as db_file:
+            await context.bot.send_document(
+                chat_id=ADMIN_ID,
+                document=db_file,
+                filename=f"memoremindme_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db",
+                caption=(
+                    f"📦 <b>Автоматичний backup</b>\n\n"
+                    f"📅 Дата: {current_time}\n"
+                    f"📊 Розмір: {file_size_mb:.2f} MB\n"
+                    f"✅ База даних успішно збережена"
+                ),
+                parse_mode="HTML"
+            )
+
+        logger.info("✅ Backup успішно відправлено адміністратору")
+
+    except Exception as e:
+        error_msg = f"❌ Помилка при створенні backup: {str(e)}"
+        logger.error(error_msg)
+
+        # Повідомляємо адміна про помилку
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"🚨 <b>Помилка backup!</b>\n\n"
+                     f"{error_msg}\n"
+                     f"Час: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                parse_mode="HTML"
+            )
+        except Exception as notify_error:
+            logger.error(f"Не вдалося повідомити адміна про помилку backup: {notify_error}")
+
+
+async def backup_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ручний backup за кнопкою в меню налаштувань
+    Доступно тільки для адміністратора
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Перевіряємо чи це адміністратор
+    if user_id != ADMIN_ID:
+        await query.edit_message_text(
+            "❌ <b>Доступ заборонено!</b>\n\n"
+            "Ця функція доступна тільки адміністратору.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="settings")]
+            ])
+        )
+        return
+
+    try:
+        # Перевіряємо чи існує файл
+        if not os.path.exists(DB_PATH):
+            await query.edit_message_text(
+                "❌ <b>Помилка!</b>\n\n"
+                f"Файл бази даних не знайдено: {DB_PATH}",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Назад", callback_data="settings")]
+                ])
+            )
+            return
+
+        # Отримуємо інформацію про файл
+        file_size = os.path.getsize(DB_PATH)
+        file_size_mb = file_size / (1024 * 1024)
+        current_time = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+        # Відправляємо файл
+        with open(DB_PATH, 'rb') as db_file:
+            await context.bot.send_document(
+                chat_id=ADMIN_ID,
+                document=db_file,
+                filename=f"memoremindme_manual_{datetime.now().strftime('%Y%m%d_%H%M')}.db",
+                caption=(
+                    f"🗄 <b>Ручний backup</b>\n\n"
+                    f"👤 Запитано користувачем: {update.effective_user.username or user_id}\n"
+                    f"📅 Дата: {current_time}\n"
+                    f"📊 Розмір: {file_size_mb:.2f} MB"
+                ),
+                parse_mode="HTML"
+            )
+
+        # Повідомлення про успіх
+        await query.edit_message_text(
+            "✅ <b>Backup створено!</b>\n\n"
+            f"📊 Розмір файлу: {file_size_mb:.2f} MB\n"
+            f"📅 Час: {current_time}\n\n"
+            f"Файл відправлено вам в особисті повідомлення.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад до налаштувань", callback_data="settings")]
+            ])
+        )
+
+    except Exception as e:
+        logger.error(f"Помилка ручного backup: {e}")
+        await query.edit_message_text(
+            f"❌ <b>Помилка при створенні backup!</b>\n\n"
+            f"{str(e)}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="settings")]
+            ])
+        )
+
+
+# Обробник для імпорту в main.py
+backup_handler = CallbackQueryHandler(backup_button_handler, pattern="^download_backup$")
+</file>
+
+<file path="handlers/delete.py">
+# handlers/delete.py - Видалення нагадувань (оновлена версія)
+
+from datetime import date
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackQueryHandler
+
+from database import get_db_connection
+from utils import format_date
+
+
+async def confirm_delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок видалення — показ підтвердження з деталями"""
+    query = update.callback_query
+    await query.answer()
+
+    # Парсимо: confirm_delete_{id}_period_{period}_page_{page}
+    data = query.data
+    parts = data.split('_')
+    reminder_id = int(parts[2])
+    period = parts[4]
+    page = int(parts[6])
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Отримуємо інформацію про нагадування
+        cursor.execute("""
+            SELECT r.*, g.name as group_name, g.group_id
+            FROM reminders r
+            LEFT JOIN groups g ON r.group_id = g.group_id
+            WHERE r.reminder_id = ?
+        """, (reminder_id,))
+
+        reminder = cursor.fetchone()
+
+        if not reminder:
+            await query.edit_message_text(
+                "❌ Нагадування не знайдено або вже видалено.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Перевіряємо права на видалення
+        can_delete = False
+
+        if reminder['user_id'] == user_id:
+            # Це своє нагадування
+            can_delete = True
+        elif reminder['group_id']:
+            # Це групове нагадування — перевіримо чи користувач адмін
+            cursor.execute("""
+                SELECT is_admin FROM group_members 
+                WHERE group_id = ? AND user_id = ?
+            """, (reminder['group_id'], user_id))
+            member = cursor.fetchone()
+            if member and member['is_admin']:
+                can_delete = True
+
+        if not can_delete:
+            await query.edit_message_text(
+                "❌ У вас немає прав для видалення цього нагадування.\n"
+                "Видалити може тільки автор або адміністратор групи.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Назад до списку",
+                        callback_data=f"back_to_list_{period}_{page}")
+                ]])
+            )
+            return
+
+        # Конвертуємо дату
+        next_date = reminder['next_date']
+        if isinstance(next_date, str):
+            next_date = date.fromisoformat(next_date)
+
+        # Формуємо текст підтвердження
+        type_names = {
+            'once': '🔔 Разове',
+            'monthly': '🔄 Щомісячне',
+            'yearly': '📅 Щорічне'
+        }
+
+        group_text = ""
+        if reminder['group_name']:
+            group_text = f"\n👥 Група: {reminder['group_name']}"
+
+        confirm_text = (
+            f"🗑️ <b>Підтвердження видалення</b>\n\n"
+            f"📅 Дата: {format_date(next_date)}\n"
+            f"📝 Текст: {reminder['text']}\n"
+            f"🔔 Тип: {type_names.get(reminder['type'], reminder['type'])}"
+            f"{group_text}\n\n"
+            f"⚠️ Ви впевнені, що хочете видалити це нагадування?"
+        )
+
+        # Кнопки підтвердження
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Так, видалити",
+                    callback_data=f"execute_delete_{reminder_id}_period_{period}_page_{page}"),
+                InlineKeyboardButton("❌ Ні, скасувати",
+                    callback_data=f"back_to_list_{period}_{page}")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            confirm_text,
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+    finally:
+        conn.close()
+
+
+async def execute_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Виконання видалення"""
+    query = update.callback_query
+    await query.answer()
+
+    # Парсимо: execute_delete_{id}_period_{period}_page_{page}
+    data = query.data
+    parts = data.split('_')
+    reminder_id = int(parts[2])
+    period = parts[4]
+    page = int(parts[6])
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Перевіряємо ще раз права
+        cursor.execute("""
+            SELECT r.user_id, r.group_id, r.text, g.name as group_name
+            FROM reminders r
+            LEFT JOIN groups g ON r.group_id = g.group_id
+            WHERE r.reminder_id = ?
+        """, (reminder_id,))
+
+        reminder = cursor.fetchone()
+
+        if not reminder:
+            await query.edit_message_text(
+                "❌ Нагадування вже видалено.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Видаляємо нагадування
+        cursor.execute("DELETE FROM reminders WHERE reminder_id = ?", (reminder_id,))
+        conn.commit()
+
+        # Формуємо повідомлення про успіх
+        group_text = ""
+        if reminder['group_name']:
+            group_text = f" з групи \"{reminder['group_name']}\""
+
+        await query.edit_message_text(
+            f"✅ <b>Нагадування видалено!</b>\n\n"
+            f"📝 \"{reminder['text']}\"{group_text}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Повернутися до списку",
+                    callback_data=f"back_to_list_{period}_{page}")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+            ])
+        )
+
+    finally:
+        conn.close()
+
+
+# Список обробників для імпорту в main.py
+delete_handlers = [
+    CallbackQueryHandler(confirm_delete_start, pattern="^confirm_delete_"),
+    CallbackQueryHandler(execute_delete, pattern="^execute_delete_"),
+]
+</file>
+
+<file path="handlers/edit.py">
+# handlers/edit.py - Редагування тексту нагадувань
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters, ConversationHandler, CommandHandler
+
+from database import get_db_connection
+from utils import format_date
+from datetime import date
+
+# Стани розмови для редагування
+WAITING_FOR_NEW_TEXT = 1
+
+
+async def start_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок редагування тексту — показуємо поточний текст і просимо новий"""
+    query = update.callback_query
+    await query.answer()
+
+    # Парсимо: edit_text_{id}_period_{period}_page_{page}
+    data = query.data
+    parts = data.split('_')
+    reminder_id = int(parts[2])
+    period = parts[4]
+    page = int(parts[6])
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Отримуємо нагадування з перевіркою прав
+        cursor.execute("""
+            SELECT r.*, g.name as group_name
+            FROM reminders r
+            LEFT JOIN groups g ON r.group_id = g.group_id
+            WHERE r.reminder_id = ?
+        """, (reminder_id,))
+
+        reminder = cursor.fetchone()
+
+        if not reminder:
+            await query.edit_message_text(
+                "❌ Нагадування не знайдено.",
+                parse_mode="HTML"
+            )
+            return ConversationHandler.END
+
+        # Перевіряємо права (тільки автор може редагувати)
+        if reminder['user_id'] != user_id:
+            await query.edit_message_text(
+                "❌ Редагувати може тільки автор нагадування.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Назад до списку",
+                        callback_data=f"back_to_list_{period}_{page}")
+                ]])
+            )
+            return ConversationHandler.END
+
+        # Зберігаємо дані в контексті
+        context.user_data['edit_reminder_id'] = reminder_id
+        context.user_data['edit_period'] = period
+        context.user_data['edit_page'] = page
+        context.user_data['edit_old_text'] = reminder['text']
+
+        # Показуємо запит на новий текст
+        await query.edit_message_text(
+            f"✏️ <b>Редагування тексту</b>\n\n"
+            f"Поточний текст:\n"
+            f"<code>{reminder['text']}</code>\n\n"
+            f"Введіть новий текст (максимум 200 символів):\n"
+            f"Або /cancel для скасування",
+            parse_mode="HTML"
+        )
+
+        return WAITING_FOR_NEW_TEXT
+
+    finally:
+        conn.close()
+
+
+async def process_new_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка нового тексту"""
+    new_text = update.message.text.strip()
+    user_id = update.effective_user.id
+
+    # Перевірка довжини
+    from config import MAX_TEXT_LENGTH
+    if len(new_text) > MAX_TEXT_LENGTH:
+        await update.message.reply_text(
+            f"❌ <b>Текст занадто довгий!</b>\n\n"
+            f"Максимум {MAX_TEXT_LENGTH} символів.\n"
+            f"Ви ввели {len(new_text)} символів.\n"
+            f"Спробуйте ще раз або /cancel:",
+            parse_mode="HTML"
+        )
+        return WAITING_FOR_NEW_TEXT
+
+    # Отримуємо дані з контексту
+    reminder_id = context.user_data.get('edit_reminder_id')
+    period = context.user_data.get('edit_period')
+    page = context.user_data.get('edit_page')
+
+    if not reminder_id:
+        await update.message.reply_text(
+            "❌ Помилка: дані не знайдено. Почніть спочатку.",
+            parse_mode="HTML"
+        )
+        return ConversationHandler.END
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Оновлюємо текст в БД
+        cursor.execute("""
+            UPDATE reminders SET text = ? WHERE reminder_id = ? AND user_id = ?
+        """, (new_text, reminder_id, user_id))
+
+        conn.commit()
+
+        # Отримуємо оновлені дані для показу
+        cursor.execute("""
+            SELECT r.*, g.name as group_name
+            FROM reminders r
+            LEFT JOIN groups g ON r.group_id = g.group_id
+            WHERE r.reminder_id = ?
+        """, (reminder_id,))
+
+        reminder = cursor.fetchone()
+
+        if not reminder:
+            await update.message.reply_text(
+                "❌ Помилка: нагадування не знайдено після оновлення.",
+                parse_mode="HTML"
+            )
+            return ConversationHandler.END
+
+        # Формуємо повідомлення про успіх
+        type_names = {
+            'once': '🔔 Разове',
+            'monthly': '🔄 Щомісячне',
+            'yearly': '📅 Щорічне'
+        }
+
+        rem_date = reminder['next_date']
+        if isinstance(rem_date, str):
+            rem_date = date.fromisoformat(rem_date)
+
+        context_type = f"👥 Група: {reminder['group_name']}" if reminder['group_id'] else "👤 Особисте"
+
+        message = (
+            f"✅ <b>Текст оновлено!</b>\n\n"
+            f"📅 <b>Дата:</b> {format_date(rem_date)}\n"
+            f"📝 <b>Текст:</b> {reminder['text']}\n"
+            f"🔔 <b>Тип:</b> {type_names.get(reminder['type'], reminder['type'])}\n"
+            f"{context_type}"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("✏️ Редагувати ще раз",
+                callback_data=f"edit_text_{reminder_id}_period_{period}_page_{page}")],
+            [InlineKeyboardButton("🔙 Назад до списку",
+                callback_data=f"back_to_list_{period}_{page}")],
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+        ]
+
+        await update.message.reply_text(
+            message,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    finally:
+        conn.close()
+        # Очищаємо контекст
+        for key in ['edit_reminder_id', 'edit_period', 'edit_page', 'edit_old_text']:
+            if key in context.user_data:
+                del context.user_data[key]
+
+    return ConversationHandler.END
+
+
+async def cancel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування редагування"""
+    # Очищаємо контекст
+    for key in ['edit_reminder_id', 'edit_period', 'edit_page', 'edit_old_text']:
+        if key in context.user_data:
+            del context.user_data[key]
+
+    await update.message.reply_text(
+        "❌ Редагування скасовано.",
+        parse_mode="HTML"
+    )
+    return ConversationHandler.END
+
+
+# ConversationHandler для редагування
+edit_text_conv = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(start_edit_text, pattern="^edit_text_")
+    ],
+    states={
+        WAITING_FOR_NEW_TEXT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, process_new_text)
+        ],
+    },
+    fallbacks=[
+        CommandHandler("cancel", cancel_edit)
+    ],
+    per_message=False
+)
+
+# Список обробників для імпорту в main.py
+edit_handlers = [edit_text_conv]
+</file>
+
+<file path="handlers/groups.py">
+# handlers/groups.py - Управління групами
+
+import random
+import string
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ContextTypes,
+    ConversationHandler,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
+
+from database import get_db_connection
+from config import MAX_GROUPS_PER_USER, MAX_MEMBERS_PER_GROUP, MAX_GROUP_NAME_LENGTH
+from utils import check_cooldown  # ← ДОДАНО імпорт
+
+# Стани розмови для створення групи
+WAITING_FOR_GROUP_NAME = 1
+WAITING_FOR_JOIN_CODE = 2
+
+# Тимчасове сховище для створення групи
+group_creation_data = {}
+
+
+def generate_group_code():
+    """Генерація випадкового коду групи (6 символів: літери + цифри)"""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+
+# ==================== СТВОРЕННЯ ГРУПИ ====================
+
+async def create_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок створення групи"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text(
+            "➕ <b>Створення групи</b>\n\n"
+            "Введіть назву групи (до 30 символів):\n"
+            "Наприклад: <code>Сім'я</code> або <code>Робочі завдання</code>",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text(
+            "➕ <b>Створення групи</b>\n\n"
+            "Введіть назву групи (до 30 символів):",
+            parse_mode="HTML"
+        )
+    return WAITING_FOR_GROUP_NAME
+
+
+async def process_group_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка назви групи та показ головного меню"""
+    user_id = update.effective_user.id
+    name = update.message.text.strip()
+
+    # Перевірка довжини
+    if len(name) > MAX_GROUP_NAME_LENGTH:
+        await update.message.reply_text(
+            f"❌ Назва занадто довга (максимум {MAX_GROUP_NAME_LENGTH} символів).\n"
+            f"Ви ввели {len(name)} символів. Спробуйте ще раз:",
+            parse_mode="HTML"
+        )
+        return WAITING_FOR_GROUP_NAME
+
+    if len(name) < 2:
+        await update.message.reply_text(
+            "❌ Назва занадто коротка (мінімум 2 символи).\n"
+            "Спробуйте ще раз:",
+            parse_mode="HTML"
+        )
+        return WAITING_FOR_GROUP_NAME
+
+    # Перевірка ліміту груп для користувача
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM groups WHERE created_by = ?
+        """, (user_id,))
+        result = cursor.fetchone()
+
+        if result['count'] >= MAX_GROUPS_PER_USER:
+            await update.message.reply_text(
+                f"❌ Ви вже створили максимальну кількість груп ({MAX_GROUPS_PER_USER}).\n"
+                f"Видаліть існуючу групу, щоб створити нову.",
+                parse_mode="HTML"
+            )
+            return ConversationHandler.END
+
+        # Генеруємо унікальний код
+        code = generate_group_code()
+        while True:
+            cursor.execute("SELECT 1 FROM groups WHERE code = ?", (code,))
+            if not cursor.fetchone():
+                break
+            code = generate_group_code()
+
+        # Створюємо групу
+        cursor.execute("""
+            INSERT INTO groups (name, code, created_by)
+            VALUES (?, ?, ?)
+        """, (name, code, user_id))
+
+        group_id = cursor.lastrowid
+
+        # Додаємо створювача як адміна групи
+        cursor.execute("""
+            INSERT INTO group_members (group_id, user_id, is_admin)
+            VALUES (?, ?, 1)
+        """, (group_id, user_id))
+
+        conn.commit()
+
+        # === ВІДПРАВЛЯЄМО ПОВІДОМЛЕННЯ ПРО УСПІХ ===
+        await update.message.reply_text(
+            f"✅ <b>Групу створено!</b>\n\n"
+            f"📛 <b>Назва:</b> {name}\n"
+            f"🔑 <b>Код для приєднання:</b> <code>{code}</code>\n\n"
+            f"Поділіться цим кодом з тими, кого хочете запросити.\n"
+            f"Вони можуть приєднатися через меню груп.",
+            parse_mode="HTML"
+        )
+
+        # === АВТОМАТИЧНО ВІДКРИВАЄМО ГОЛОВНЕ МЕНЮ ===
+        # Імпортуємо функцію показу меню з main.py
+        from main import show_main_menu
+
+        await show_main_menu(update, context)
+
+    finally:
+        conn.close()
+
+    return ConversationHandler.END
+
+
+# ==================== ПРИЄДНАННЯ ДО ГРУПИ ====================
+
+async def join_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок приєднання до групи"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text(
+            "🔗 <b>Приєднання до групи</b>\n\n"
+            "Введіть код групи (6 символів):\n"
+            "Наприклад: <code>ABC123</code>",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text(
+            "🔗 <b>Приєднання до групи</b>\n\n"
+            "Введіть код групи (6 символів):",
+            parse_mode="HTML"
+        )
+    return WAITING_FOR_JOIN_CODE
+
+
+async def process_join_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка коду приєднання та показ головного меню"""
+    user_id = update.effective_user.id
+    code = update.message.text.strip().upper()
+
+    # Перевірка формату коду
+    if len(code) != 6:
+        await update.message.reply_text(
+            "❌ Код має містити рівно 6 символів (літери та цифри).\n"
+            "Спробуйте ще раз:",
+            parse_mode="HTML"
+        )
+        return WAITING_FOR_JOIN_CODE
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Шукаємо групу за кодом
+        cursor.execute("""
+            SELECT * FROM groups WHERE code = ?
+        """, (code,))
+        group = cursor.fetchone()
+
+        if not group:
+            await update.message.reply_text(
+                "❌ Групу з таким кодом не знайдено.\n"
+                "Перевірте код і спробуйте ще раз:",
+                parse_mode="HTML"
+            )
+            return WAITING_FOR_JOIN_CODE
+
+        group_id = group['group_id']
+
+        # Перевірка чи вже є в групі
+        cursor.execute("""
+            SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?
+        """, (group_id, user_id))
+        if cursor.fetchone():
+            await update.message.reply_text(
+                f"❌ Ви вже є учасником групи <b>{group['name']}</b>!",
+                parse_mode="HTML"
+            )
+            return ConversationHandler.END
+
+        # Перевірка ліміту учасників
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM group_members WHERE group_id = ?
+        """, (group_id,))
+        member_count = cursor.fetchone()['count']
+
+        if member_count >= MAX_MEMBERS_PER_GROUP:
+            await update.message.reply_text(
+                f"❌ Група <b>{group['name']}</b> заповнена (максимум {MAX_MEMBERS_PER_GROUP} учасників).\n"
+                f"Зверніться до адміністратора групи.",
+                parse_mode="HTML"
+            )
+            return ConversationHandler.END
+
+        # Додаємо користувача до групи
+        cursor.execute("""
+            INSERT INTO group_members (group_id, user_id, is_admin)
+            VALUES (?, ?, 0)
+        """, (group_id, user_id))
+
+        conn.commit()
+
+        # === ВІДПРАВЛЯЄМО ПОВІДОМЛЕННЯ ПРО УСПІХ ===
+        await update.message.reply_text(
+            f"✅ <b>Ви приєдналися до групи!</b>\n\n"
+            f"📛 <b>Назва:</b> {group['name']}\n"
+            f"👥 Тепер ви можете додавати нагадування для цієї групи.",
+            parse_mode="HTML"
+        )
+
+        # === АВТОМАТИЧНО ВІДКРИВАЄМО ГОЛОВНЕ МЕНЮ ===
+        from main import show_main_menu
+
+        await show_main_menu(update, context)
+
+    finally:
+        conn.close()
+
+    return ConversationHandler.END
+
+
+# ==================== ВИХІД З ГРУПИ ====================
+
+async def leave_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок виходу з групи — показуємо список груп для виходу"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Отримуємо всі групи користувача (крім тих, де він адмін — їх не можна покинути, тільки видалити)
+        cursor.execute("""
+            SELECT g.group_id, g.name, g.code, gm.is_admin
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE gm.user_id = ? AND gm.is_admin = 0
+            ORDER BY g.name
+        """, (user_id,))
+
+        groups = cursor.fetchall()
+
+        if not groups:
+            await query.edit_message_text(
+                "❌ <b>Немає груп для виходу</b>\n\n"
+                "Ви не є учасником жодної групи (крім тих, де ви адміністратор).\n"
+                "Адміністратор не може просто вийти — тільки видалити групу.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Назад", callback_data="my_groups")]
+                ])
+            )
+            return
+
+        # Формуємо кнопки груп
+        keyboard = []
+        for group in groups:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🚪 {group['name']}",
+                    callback_data=f"leave_group_{group['group_id']}"
+                )
+            ])
+
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="my_groups")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            "🚪 <b>Вихід з групи</b>\n\n"
+            "Оберіть групу, з якої хочете вийти:\n"
+            "(Групи, де ви адміністратор, не відображаються — їх можна тільки видалити)",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+    finally:
+        conn.close()
+
+
+async def confirm_leave_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Підтвердження виходу з групи"""
+    query = update.callback_query
+    await query.answer()
+
+    # Отримуємо ID групи з callback_data (формат: leave_group_123)
+    data = query.data
+    group_id = int(data.replace("leave_group_", ""))
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Перевіряємо чи група існує і чи користувач є учасником (не адмін)
+        cursor.execute("""
+            SELECT g.name, gm.is_admin
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE g.group_id = ? AND gm.user_id = ?
+        """, (group_id, user_id))
+
+        group = cursor.fetchone()
+
+        if not group:
+            await query.edit_message_text(
+                "❌ Групу не знайдено або ви не є її учасником.",
+                parse_mode="HTML"
+            )
+            return
+
+        if group['is_admin']:
+            await query.edit_message_text(
+                "❌ Ви адміністратор цієї групи. Адмін не може вийти — тільки видалити групу.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🗑️ Видалити групу", callback_data="delete_group_menu")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="my_groups")]
+                ])
+            )
+            return
+
+        # Видаляємо користувача з групи
+        cursor.execute("""
+            DELETE FROM group_members 
+            WHERE group_id = ? AND user_id = ?
+        """, (group_id, user_id))
+
+        # Видаляємо всі нагадування цього користувача в цій групі
+        cursor.execute("""
+            DELETE FROM reminders 
+            WHERE group_id = ? AND user_id = ?
+        """, (group_id, user_id))
+
+        conn.commit()
+
+        # Якщо це була активна група — очищаємо контекст
+        active_group = context.user_data.get('active_group')
+        if active_group and active_group['id'] == group_id:
+            del context.user_data['active_group']
+
+        await query.edit_message_text(
+            f"✅ <b>Ви вийшли з групи!</b>\n\n"
+            f"📛 Група: {group['name']}\n\n"
+            f"Ваші нагадування в цій групі також видалені.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("👥 Мої групи", callback_data="my_groups")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+            ])
+        )
+
+    finally:
+        conn.close()
+
+
+# ==================== ВИДАЛЕННЯ ГРУПИ (тільки для адміна) ====================
+
+async def delete_group_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню видалення групи — показуємо групи, де користувач адмін"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Отримуємо групи, де користувач є адміністратором
+        cursor.execute("""
+            SELECT g.group_id, g.name, g.code,
+                   (SELECT COUNT(*) FROM group_members WHERE group_id = g.group_id) as member_count
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE gm.user_id = ? AND gm.is_admin = 1
+            ORDER BY g.name
+        """, (user_id,))
+
+        groups = cursor.fetchall()
+
+        if not groups:
+            await query.edit_message_text(
+                "❌ <b>Немає груп для видалення</b>\n\n"
+                "Ви не є адміністратором жодної групи.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Назад", callback_data="my_groups")]
+                ])
+            )
+            return
+
+        # Формуємо кнопки груп
+        keyboard = []
+        for group in groups:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🗑️ {group['name']} ({group['member_count']} учасників)",
+                    callback_data=f"delete_group_{group['group_id']}"
+                )
+            ])
+
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="my_groups")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            "🗑️ <b>Видалення групи</b>\n\n"
+            "⚠️ <b>Увага!</b> Видалення групи призведе до:\n"
+            "• Видалення ВСІХ нагадувань групи\n"
+            "• Видалення ВСІХ учасників з групи\n"
+            "• Групу не можна буде відновити!\n\n"
+            "Оберіть групу для видалення:",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+    finally:
+        conn.close()
+
+
+async def confirm_delete_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Підтвердження видалення групи — запитуємо підтвердження"""
+    query = update.callback_query
+    await query.answer()
+
+    # Отримуємо ID групи
+    data = query.data
+    group_id = int(data.replace("delete_group_", ""))
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Перевіряємо чи користувач адмін цієї групи
+        cursor.execute("""
+            SELECT g.name, g.code
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE g.group_id = ? AND gm.user_id = ? AND gm.is_admin = 1
+        """, (group_id, user_id))
+
+        group = cursor.fetchone()
+
+        if not group:
+            await query.edit_message_text(
+                "❌ Групу не знайдено або у вас немає прав для видалення.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Зберігаємо ID групи в контексті для підтвердження
+        context.user_data['delete_group_id'] = group_id
+
+        # Кнопки підтвердження
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Так, видалити", callback_data="confirm_delete_group_yes"),
+                InlineKeyboardButton("❌ Ні, скасувати", callback_data="confirm_delete_group_no")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            f"🗑️ <b>Підтвердження видалення групи</b>\n\n"
+            f"📛 Назва: {group['name']}\n"
+            f"🔑 Код: {group['code']}\n\n"
+            f"⚠️ Ця дія <b>НЕЗВОРОТНЯ</b>!\n"
+            f"Всі нагадування та учасники будуть видалені.\n\n"
+            f"Ви впевнені?",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+    finally:
+        conn.close()
+
+
+async def execute_delete_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Виконання видалення групи"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Отримуємо ID групи з контексту
+    group_id = context.user_data.get('delete_group_id')
+
+    if not group_id:
+        await query.edit_message_text(
+            "❌ Помилка: не знайдено групу для видалення.",
+            parse_mode="HTML"
+        )
+        return
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Перевіряємо ще раз права адміна
+        cursor.execute("""
+            SELECT g.name
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE g.group_id = ? AND gm.user_id = ? AND gm.is_admin = 1
+        """, (group_id, user_id))
+
+        group = cursor.fetchone()
+
+        if not group:
+            await query.edit_message_text(
+                "❌ Помилка: групу не знайдено або недостатньо прав.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Видаляємо нагадування групи
+        cursor.execute("DELETE FROM reminders WHERE group_id = ?", (group_id,))
+
+        # Видаляємо учасників групи
+        cursor.execute("DELETE FROM group_members WHERE group_id = ?", (group_id,))
+
+        # Видаляємо саму групу
+        cursor.execute("DELETE FROM groups WHERE group_id = ?", (group_id,))
+
+        conn.commit()
+
+        # Якщо це була активна група — очищаємо контекст
+        active_group = context.user_data.get('active_group')
+        if active_group and active_group['id'] == group_id:
+            del context.user_data['active_group']
+
+        # Очищаємо контекст
+        if 'delete_group_id' in context.user_data:
+            del context.user_data['delete_group_id']
+
+        await query.edit_message_text(
+            f"✅ <b>Групу видалено!</b>\n\n"
+            f"📛 {group['name']}\n\n"
+            f"Всі нагадування та учасники видалені.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("👥 Мої групи", callback_data="my_groups")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+            ])
+        )
+
+    finally:
+        conn.close()
+
+
+async def cancel_delete_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування видалення групи"""
+    query = update.callback_query
+    await query.answer()
+
+    # Очищаємо контекст
+    if 'delete_group_id' in context.user_data:
+        del context.user_data['delete_group_id']
+
+    await query.edit_message_text(
+        "❌ Видалення групи скасовано.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("👥 Мої групи", callback_data="my_groups")],
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+        ])
+    )
+
+
+# ← ВИПРАВЛЕНО: Прибрано зайвий відступ перед async def
+async def group_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ інформації про групу"""
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    # Антиспам
+    if not check_cooldown(user_id, "group_info", cooldown_seconds=2):
+        await query.answer("⏱ Занадто швидко!", show_alert=False)
+        return
+
+    await query.answer()
+
+    # Отримуємо ID групи з callback_data (формат: group_info_123)
+    data = query.data
+    group_id = int(data.replace("group_info_", ""))
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Перевіряємо чи користувач є в групі
+        cursor.execute("""
+            SELECT g.name, g.code, gm.is_admin
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE g.group_id = ? AND gm.user_id = ?
+        """, (group_id, user_id))
+
+        membership = cursor.fetchone()
+
+        if not membership:
+            await query.edit_message_text(
+                "❌ Групу не знайдено або ви не є її учасником.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Отримуємо кількість учасників
+        cursor.execute("""
+            SELECT COUNT(*) as count FROM group_members WHERE group_id = ?
+        """, (group_id,))
+        member_count = cursor.fetchone()['count']
+
+        # Отримуємо список учасників з іменами
+        cursor.execute("""
+            SELECT u.user_id, u.username, u.first_name, u.last_name, gm.is_admin
+            FROM users u
+            JOIN group_members gm ON u.user_id = gm.user_id
+            WHERE gm.group_id = ?
+            ORDER BY gm.is_admin DESC, u.first_name
+        """, (group_id,))
+
+        members = cursor.fetchall()
+
+        # Формуємо список учасників
+        members_list = []
+        for idx, member in enumerate(members, 1):
+            # Формуємо ім'я для відображення
+            if member['username']:
+                name = f"@{member['username']}"
+            elif member['first_name']:
+                name = member['first_name']
+                if member['last_name']:
+                    name += f" {member['last_name']}"
+            else:
+                name = f"Користувач {member['user_id']}"
+
+            # Додаємо позначку адміна
+            admin_mark = " 👑" if member['is_admin'] else ""
+            members_list.append(f"{idx}. {name}{admin_mark}")
+
+        # Формуємо повідомлення
+        admin_status = "Так" if membership['is_admin'] else "Ні"
+
+        message = (
+            f"👥 <b>Група: {membership['name']}</b>\n\n"
+            f"🔑 <b>Код для запрошення:</b> <code>{membership['code']}</code>\n"
+            f"👤 <b>Учасників:</b> {member_count}\n"
+            f"👑 <b>Ви адмін:</b> {admin_status}\n\n"
+            f"<b>Список учасників:</b>\n"
+        )
+
+        # Додаємо список учасників
+        if members_list:
+            message += "\n".join(members_list)
+        else:
+            message += "Немає учасників"
+
+        # Формуємо кнопки
+        keyboard = []
+
+        # Кнопка "Поділитися кодом" (тільки для адмінів)
+        if membership['is_admin']:
+            keyboard.append([
+                InlineKeyboardButton("📤 Поділитися кодом",
+                                     switch_inline_query=f"Приєднуйся до групи '{membership['name']}'! Код: {membership['code']}")
+            ])
+
+        # Кнопка перегляду нагадувань групи
+        keyboard.append([
+            InlineKeyboardButton("📋 Нагадування групи", callback_data=f"switch_to_group_{group_id}")
+        ])
+
+        # Кнопка виходу (для не-адмінів) або видалення (для адмінів)
+        if membership['is_admin']:
+            keyboard.append([
+                InlineKeyboardButton("🗑️ Видалити групу", callback_data=f"delete_group_{group_id}")
+            ])
+        else:
+            keyboard.append([
+                InlineKeyboardButton("🚪 Вийти з групи", callback_data=f"leave_group_{group_id}")
+            ])
+
+        keyboard.append([InlineKeyboardButton("🔙 Назад до списку", callback_data="my_groups")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            message,
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+    finally:
+        conn.close()
+
+
+async def my_groups_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ списку моїх груп з можливістю вийти/видалити"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Отримуємо всі групи користувача
+        cursor.execute("""
+            SELECT g.group_id, g.name, g.code, gm.is_admin
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE gm.user_id = ?
+            ORDER BY g.name
+        """, (user_id,))
+
+        groups = cursor.fetchall()
+
+        if not groups:
+            await query.edit_message_text(
+                "👥 <b>Мої групи</b>\n\n"
+                "Ви не є учасником жодної групи.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Створити групу", callback_data="create_group")],
+                    [InlineKeyboardButton("🔗 Приєднатися", callback_data="join_group")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="groups_menu")]
+                ])
+            )
+            return
+
+        # Формуємо кнопки груп
+        keyboard = []
+        for group in groups:
+            admin_mark = " 👑" if group['is_admin'] else ""
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"👥 {group['name']}{admin_mark}",
+                    callback_data=f"group_info_{group['group_id']}"
+                )
+            ])
+
+        # Кнопки управління
+        keyboard.append([InlineKeyboardButton("🚪 Вийти з групи", callback_data="leave_group")])
+        keyboard.append([InlineKeyboardButton("🗑️ Видалити групу", callback_data="delete_group_menu")])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="groups_menu")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            "👥 <b>Мої групи</b>\n\n"
+            "Оберіть групу або дію:\n"
+            "👑 — ви адміністратор",
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+
+    finally:
+        conn.close()
+
+
+# ==================== ConversationHandlers ====================
+
+# ConversationHandler для створення групи
+create_group_conv = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(create_group_start, pattern="^create_group$")
+    ],
+    states={
+        WAITING_FOR_GROUP_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, process_group_name)
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: u.message.reply_text("❌ Скасовано."))],
+    per_message=False
+)
+
+# ConversationHandler для приєднання до групи
+join_group_conv = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(join_group_start, pattern="^join_group$")
+    ],
+    states={
+        WAITING_FOR_JOIN_CODE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, process_join_code)
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: u.message.reply_text("❌ Скасовано."))],
+    per_message=False
+)
+
+# Список обробників для імпорту в main.py
+groups_handlers = [
+    # Інформація про групу
+    CallbackQueryHandler(group_info, pattern="^group_info_"),
+    # Вихід з групи
+    CallbackQueryHandler(leave_group_start, pattern="^leave_group$"),
+    CallbackQueryHandler(confirm_leave_group, pattern="^leave_group_"),
+    # Видалення групи
+    CallbackQueryHandler(delete_group_menu, pattern="^delete_group_menu$"),
+    CallbackQueryHandler(confirm_delete_group, pattern="^delete_group_"),
+    CallbackQueryHandler(execute_delete_group, pattern="^confirm_delete_group_yes$"),
+    CallbackQueryHandler(cancel_delete_group, pattern="^confirm_delete_group_no$"),
+    CallbackQueryHandler(my_groups_menu, pattern="^my_groups$"),
+    # ======================
+    create_group_conv,
+    join_group_conv,
+]
+</file>
+
+<file path="handlers/list.py">
+# handlers/list.py - Перегляд нагадувань з пагінацією
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackQueryHandler
+
+from database import get_db_connection
+from utils import format_date, get_week_dates
+from datetime import date, timedelta
+from utils import check_cooldown  # ← ДОДАНО імпорт
+
+REMINDERS_PER_PAGE = 5  # Кількість нагадувань на сторінці
+
+
+async def list_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE, period="all", page=0):
+    """Показ нагадувань за період з пагінацією та компактними кнопками"""
+    user_id = update.effective_user.id
+    active_group = context.user_data.get('active_group')
+
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        today = date.today()
+
+        # Формуємо умову для дати
+        if period == "today":
+            date_filter = "AND r.next_date = ?"
+            params = [today]
+            title = "📅 Сьогодні"
+        elif period == "week":
+            week_dates = get_week_dates(today)
+            date_filter = "AND r.next_date BETWEEN ? AND ?"
+            params = [week_dates[0], week_dates[6]]
+            title = "📆 Цей тиждень"
+        elif period == "month":
+            first_day = today.replace(day=1)
+            if today.month == 12:
+                last_day = today.replace(day=31)
+            else:
+                next_month = today.replace(month=today.month + 1, day=1)
+                last_day = next_month - timedelta(days=1)
+            date_filter = "AND r.next_date BETWEEN ? AND ?"
+            params = [first_day, last_day]
+            title = "🗓️ Цей місяць"
+        else:
+            date_filter = ""
+            params = []
+            title = "📋 Всі нагадування"
+
+        # Формуємо базовий запит
+        if active_group:
+            base_params = [active_group['id']]
+            group_filter = "AND r.group_id = ?"
+        else:
+            base_params = [user_id, user_id]
+            group_filter = """
+                AND (
+                    (r.group_id IS NULL AND r.user_id = ?)
+                    OR 
+                    (r.group_id IN (
+                        SELECT group_id FROM group_members WHERE user_id = ?
+                    ))
+                )
+            """
+
+        all_params = base_params + params
+
+        # Отримуємо всі нагадування
+        cursor.execute(f"""
+            SELECT r.*, g.name as group_name, u.username as creator_name
+            FROM reminders r
+            LEFT JOIN groups g ON r.group_id = g.group_id
+            LEFT JOIN users u ON r.user_id = u.user_id
+            WHERE 1=1 {group_filter} {date_filter}
+            ORDER BY r.next_date
+        """, all_params)
+
+        all_reminders = cursor.fetchall()
+
+        # Конвертуємо дати
+        converted_reminders = []
+        for rem in all_reminders:
+            rem_dict = dict(rem)
+            if isinstance(rem_dict['next_date'], str):
+                rem_dict['next_date'] = date.fromisoformat(rem_dict['next_date'])
+            converted_reminders.append(rem_dict)
+
+        reminders = converted_reminders
+        total = len(reminders)
+
+        if not reminders:
+            # Порожній список
+            if active_group:
+                message = f"{title} — {active_group['name']}\n\nНемає нагадувань у цій групі."
+            else:
+                message = f"{title}\n\nНемає нагадувань."
+
+            keyboard = [
+                [InlineKeyboardButton("➕ Додати нагадування", callback_data="add_reminder")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            if query:
+                await query.edit_message_text(message, parse_mode="HTML", reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
+            return
+
+        # === ПАГІНАЦІЯ ===
+        total_pages = (total + REMINDERS_PER_PAGE - 1) // REMINDERS_PER_PAGE
+
+        if page < 0:
+            page = 0
+        if page >= total_pages:
+            page = total_pages - 1
+
+        start_idx = page * REMINDERS_PER_PAGE
+        end_idx = start_idx + REMINDERS_PER_PAGE
+        page_reminders = reminders[start_idx:end_idx]
+
+        # === ФОРМУВАННЯ ПОВІДОМЛЕННЯ З НОМЕРАМИ ===
+        type_emoji = {
+            'once': '🔔',
+            'monthly': '🔄',
+            'yearly': '📅'
+        }
+
+        # Дні тижня
+        weekdays = {
+            0: 'пн', 1: 'вт', 2: 'ср', 3: 'чт',
+            4: 'пт', 5: 'сб', 6: 'нд'
+        }
+
+        # Заголовок
+        if active_group:
+            header = f"{title} — {active_group['name']} ({total})"
+        else:
+            header = f"{title} ({total})"
+
+        message = f"<b>{header}</b>\n"
+        message += f"📄 Сторінка {page + 1} з {total_pages}\n\n"
+
+        # Формуємо список з номерами 1️⃣-5️⃣
+        for idx, rem in enumerate(page_reminders, start=1):
+            icon = type_emoji.get(rem['type'], '🔔')
+            rem_date = rem['next_date']
+            date_str = f"{rem_date.day:02d}.{rem_date.month:02d}"
+
+            # Додаємо день тижня для тижневого перегляду
+            if period == "week":
+                weekday = weekdays[rem_date.weekday()]
+                date_str = f"{date_str} ({weekday})"
+
+            # Основний рядок: "1️⃣ 15.04: Текст нагадування"
+            global_num = start_idx + idx
+            line = f"{idx}️⃣ {date_str}: {rem['text']}"
+
+            # Додаємо позначку групи якщо потрібно
+            if rem.get('group_name') and not active_group:
+                line += f"\n   👥 {rem['group_name']}"
+            elif not rem.get('group_name') and not active_group:
+                line += f"\n   👤 Особисте"
+
+            message += line + "\n\n"
+
+        # === ФОРМУВАННЯ КНОПОК ===
+        keyboard = []
+
+        # Рядок з номерами нагадувань [1️⃣] [2️⃣] [3️⃣] [4️⃣] [5️⃣]
+        number_buttons = []
+        for idx, rem in enumerate(page_reminders, start=1):
+            global_num = start_idx + idx
+            number_buttons.append(
+                InlineKeyboardButton(
+                    f"{idx}️⃣",
+                    callback_data=f"view_reminder_{rem['reminder_id']}_period_{period}_page_{page}"
+                )
+            )
+        keyboard.append(number_buttons)
+
+        # Рядок навігації по сторінках
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(
+                f"◀️ Сторінка {page}",
+                callback_data=f"page_{period}_{page - 1}"
+            ))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(
+                f"Сторінка {page + 2} ▶️",
+                callback_data=f"page_{period}_{page + 1}"
+            ))
+
+        if nav_buttons:
+            # Якщо одна кнопка — розтягуємо, якщо дві — поруч
+            keyboard.append(nav_buttons)
+
+        # Рядок додавання та меню
+        keyboard.append([InlineKeyboardButton("➕ Додати нагадування", callback_data="add_reminder")])
+        keyboard.append([InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if query:
+            await query.edit_message_text(message, parse_mode="HTML", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
+
+    finally:
+        conn.close()
+
+
+async def list_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сьогодні"""
+    # Отримуємо сторінку з callback_data, якщо є
+    query = update.callback_query
+    if query and query.data.startswith("page_today_"):
+        page = int(query.data.split("_")[-1])
+    else:
+        page = 0
+    await list_reminders(update, context, "today", page)
+
+
+async def list_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Цей тиждень"""
+    query = update.callback_query
+    if query and query.data.startswith("page_week_"):
+        page = int(query.data.split("_")[-1])
+    else:
+        page = 0
+    await list_reminders(update, context, "week", page)
+
+
+async def list_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Цей місяць"""
+    query = update.callback_query
+    if query and query.data.startswith("page_month_"):
+        page = int(query.data.split("_")[-1])
+    else:
+        page = 0
+    await list_reminders(update, context, "month", page)
+
+
+async def list_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Всі"""
+    query = update.callback_query
+    if query and query.data.startswith("page_all_"):
+        page = int(query.data.split("_")[-1])
+    else:
+        page = 0
+    await list_reminders(update, context, "all", page)
+
+
+# ==================== ОБРОБНИКИ ДЕТАЛЬНОГО ПЕРЕГЛЯДУ ====================
+
+# ← ВИПРАВЛЕНО: Прибрано зайвий відступ перед async def
+async def view_reminder_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ детальної інформації про нагадування"""
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    # Антиспам
+    if not check_cooldown(user_id, "view_reminder", cooldown_seconds=1):
+        await query.answer("⏱ Занадто швидко!", show_alert=False)
+        return
+
+    await query.answer()
+
+    # Парсимо callback_data: view_reminder_{id}_period_{period}_page_{page}
+    data = query.data
+    parts = data.split('_')
+
+    reminder_id = int(parts[2])
+    period = parts[4]
+    page = int(parts[6])
+
+    user_id = update.effective_user.id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Отримуємо нагадування з перевіркою прав
+        cursor.execute("""
+            SELECT r.*, g.name as group_name, u.username as creator_name
+            FROM reminders r
+            LEFT JOIN groups g ON r.group_id = g.group_id
+            LEFT JOIN users u ON r.user_id = u.user_id
+            WHERE r.reminder_id = ?
+        """, (reminder_id,))
+
+        reminder = cursor.fetchone()
+
+        if not reminder:
+            await query.edit_message_text(
+                "❌ Нагадування не знайдено.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")
+                ]])
+            )
+            return
+
+        # Перевіряємо права доступу
+        has_access = False
+        is_creator = reminder['user_id'] == user_id
+
+        if reminder['group_id'] is None:
+            # Особисте нагадування — тільки автор
+            has_access = is_creator
+        else:
+            # Групове — перевіряємо чи є в групі
+            cursor.execute("""
+                SELECT 1 FROM group_members 
+                WHERE group_id = ? AND user_id = ?
+            """, (reminder['group_id'], user_id))
+            has_access = cursor.fetchone() is not None
+
+        if not has_access:
+            await query.edit_message_text(
+                "❌ У вас немає доступу до цього нагадування.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")
+                ]])
+            )
+            return
+
+        # Формуємо детальне повідомлення
+        type_names = {
+            'once': '🔔 Разове',
+            'monthly': '🔄 Щомісячне',
+            'yearly': '📅 Щорічне'
+        }
+
+        rem_date = reminder['next_date']
+        if isinstance(rem_date, str):
+            rem_date = date.fromisoformat(rem_date)
+
+        # Визначаємо тип (особисте/групове)
+        if reminder['group_id']:
+            context_type = f"👥 Група: {reminder['group_name']}"
+        else:
+            context_type = "👤 Особисте"
+
+        message = (
+            f"📝 <b>Деталі нагадування</b>\n\n"
+            f"📅 <b>Дата:</b> {format_date(rem_date)}\n"
+            f"📝 <b>Текст:</b> {reminder['text']}\n"
+            f"🔔 <b>Тип:</b> {type_names.get(reminder['type'], reminder['type'])}\n"
+            f"{context_type}"
+        )
+
+        # Формуємо кнопки
+        keyboard = [
+            [InlineKeyboardButton("✏️ Редагувати текст",
+                callback_data=f"edit_text_{reminder_id}_period_{period}_page_{page}")],
+            [InlineKeyboardButton("🗑️ Видалити",
+                callback_data=f"confirm_delete_{reminder_id}_period_{period}_page_{page}")],
+            [InlineKeyboardButton("🔙 Назад до списку",
+                callback_data=f"back_to_list_{period}_{page}")]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(message, parse_mode="HTML", reply_markup=reply_markup)
+
+    finally:
+        conn.close()
+
+
+async def back_to_reminders_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Повернення до списку нагадувань зі збереженням сторінки"""
+    query = update.callback_query
+    await query.answer()
+
+    # Парсимо: back_to_list_{period}_{page}
+    data = query.data
+    parts = data.split('_')
+    period = parts[3]
+    page = int(parts[4])
+
+    # Викликаємо list_reminders з збереженою сторінкою
+    await list_reminders(update, context, period, page)
+
+
+# Оновлений список обробників
+list_handlers = [
+    # Перегляд списків
+    CallbackQueryHandler(list_today, pattern="^list_today$"),
+    CallbackQueryHandler(list_today, pattern="^page_today_"),
+    CallbackQueryHandler(list_week, pattern="^list_week$"),
+    CallbackQueryHandler(list_week, pattern="^page_week_"),
+    CallbackQueryHandler(list_month, pattern="^list_month$"),
+    CallbackQueryHandler(list_month, pattern="^page_month_"),
+    CallbackQueryHandler(list_all, pattern="^list_all$"),
+    CallbackQueryHandler(list_all, pattern="^page_all_"),
+    # Детальний перегляд та навігація
+    CallbackQueryHandler(view_reminder_detail, pattern="^view_reminder_"),
+    CallbackQueryHandler(back_to_reminders_list, pattern="^back_to_list_"),
+]
+</file>
+
+<file path="handlers/reminders.py">
+# handlers/reminders.py - Обробники нагадувань (ВИПРАВЛЕНО)
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ContextTypes,
+    ConversationHandler,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
+
+from database import get_db_connection
+from utils import parse_date_input, format_date, looks_like_reminder
+from datetime import date
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Стани розмови
+WAITING_FOR_REMINDER_TEXT = 1
+WAITING_FOR_REMINDER_TYPE = 2
+WAITING_FOR_CONFIRMATION = 3
+
+# ❌ ВИДАЛЕНО: user_data = {} — тепер використовуємо context.user_data
+
+
+async def add_reminder_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок додавання нагадування"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text(
+            "➕ <b>Додати нагадування</b>\n\n"
+            "Введіть дату та текст у форматі:\n"
+            "<code>ДД.ММ Текст нагадування</code>\n\n"
+            "Приклад: <code>15.05 Оплатити інтернет</code>\n"
+            "Або: <code>15.05.2026 Зустріч з лікарем</code>",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text(
+            "➕ <b>Додати нагадування</b>\n\n"
+            "Введіть дату та текст у форматі:\n"
+            "<code>ДД.ММ Текст нагадування</code>\n\n"
+            "Приклад: <code>15.05 Оплатити інтернет</code>\n"
+            "Або: <code>15.05.2026 Зустріч з лікарем</code>",
+            parse_mode="HTML"
+        )
+    return WAITING_FOR_REMINDER_TEXT
+
+
+async def process_reminder_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введеної дати та тексту"""
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    # Парсимо дату
+    date_obj, reminder_text = parse_date_input(text)
+
+    # Перевірка довжини тексту
+    from config import MAX_TEXT_LENGTH
+    if len(reminder_text) > MAX_TEXT_LENGTH:
+        await update.message.reply_text(
+            f"❌ <b>Текст занадто довгий!</b>\n\n"
+            f"Максимум {MAX_TEXT_LENGTH} символів.\n"
+            f"Ви ввели {len(reminder_text)} символів.\n"
+            f"Спробуйте скоротити текст:",
+            parse_mode="HTML"
+        )
+        return WAITING_FOR_REMINDER_TEXT
+
+    if not date_obj or not reminder_text:
+        await update.message.reply_text(
+            "❌ <b>Невірний формат!</b>\n\n"
+            "Використовуйте:\n"
+            "<code>ДД.ММ Текст</code> (наприклад: 15.05 Оплатити інтернет)\n"
+            "Спробуйте ще раз:",
+            parse_mode="HTML"
+        )
+        return WAITING_FOR_REMINDER_TEXT
+
+    # Перевірка чи дата не в минулому
+    today = date.today()
+    if date_obj < today:
+        await update.message.reply_text(
+            "❌ <b>Дата в минулому!</b>\n"
+            f"Ви ввели: {format_date(date_obj)}\n"
+            "Введіть майбутню дату:",
+            parse_mode="HTML"
+        )
+        return WAITING_FOR_REMINDER_TEXT
+
+    # ✅ ЗБЕРІГАЄМО В context.user_data ЗАМІСТЬ ГЛОБАЛЬНОЇ ЗМІННОЇ
+    context.user_data['reminder_date'] = date_obj
+    context.user_data['reminder_text'] = reminder_text
+
+    # Питаємо тип нагадування
+    keyboard = [
+        [InlineKeyboardButton("🔔 Разове", callback_data="type_once")],
+        [InlineKeyboardButton("🔄 Щомісячне", callback_data="type_monthly")],
+        [InlineKeyboardButton("📅 Щорічне", callback_data="type_yearly")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"📅 <b>Дата:</b> {format_date(date_obj)}\n"
+        f"📝 <b>Текст:</b> {reminder_text}\n\n"
+        f"Оберіть тип нагадування:",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+    return WAITING_FOR_REMINDER_TYPE
+
+
+async def process_reminder_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору типу нагадування"""
+    query = update.callback_query
+    await query.answer()
+
+    reminder_type = query.data.replace("type_", "")
+
+    # ✅ ЗБЕРІГАЄМО В context.user_data
+    context.user_data['reminder_type'] = reminder_type
+
+    # Завжди запитуємо куди зберегти
+    active_group = context.user_data.get('active_group')
+
+    # Отримуємо список груп користувача
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT g.group_id, g.name 
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE gm.user_id = ?
+            ORDER BY g.name
+        """, (update.effective_user.id,))
+
+        user_groups = cursor.fetchall()
+    finally:
+        conn.close()
+
+    # Формуємо кнопки вибору
+    keyboard = []
+
+    # Завжди є опція "Особисте"
+    keyboard.append([InlineKeyboardButton("👤 Особисте нагадування", callback_data="save_personal")])
+
+    # Додаємо активну групу (якщо є)
+    if active_group:
+        keyboard.append([InlineKeyboardButton(f"👥 {active_group['name']} (активна група)",
+                                              callback_data=f"save_group_{active_group['id']}")])
+
+    # Додаємо інші групи користувача (крім активної)
+    for group in user_groups:
+        if not active_group or group['group_id'] != active_group['id']:
+            keyboard.append(
+                [InlineKeyboardButton(f"👥 {group['name']}", callback_data=f"save_group_{group['group_id']}")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Формуємо текст
+    group_info = ""
+    if active_group:
+        group_info = f"\n👥 Активна група: {active_group['name']}"
+
+    await query.edit_message_text(
+        f"📅 <b>Дата:</b> {format_date(context.user_data['reminder_date'])}\n"
+        f"📝 <b>Текст:</b> {context.user_data['reminder_text']}\n"
+        f"🔔 <b>Тип:</b> {get_type_name(reminder_type)}"
+        f"{group_info}\n\n"
+        f"<b>Куди зберегти?</b>",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+    return WAITING_FOR_CONFIRMATION
+
+
+async def save_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id=None, group_id=None):
+    """Збереження нагадування в базу"""
+    query = update.callback_query
+
+    if not user_id:
+        user_id = update.effective_user.id
+
+    # ✅ ОТРИМУЄМО ДАНІ З context.user_data
+    data = {
+        'date': context.user_data.get('reminder_date'),
+        'text': context.user_data.get('reminder_text'),
+        'type': context.user_data.get('reminder_type')
+    }
+
+    if not data['date'] or not data['text'] or not data['type']:
+        if query:
+            await query.edit_message_text("❌ Помилка: дані не знайдено. Почніть спочатку /add")
+        return ConversationHandler.END
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Для щомісячних зберігаємо original_day
+        original_day = data['date'].day if data['type'] == 'monthly' else None
+
+        cursor.execute("""
+            INSERT INTO reminders (user_id, group_id, text, next_date, original_day, type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            group_id,
+            data['text'],
+            data['date'],
+            original_day,
+            data['type']
+        ))
+
+        conn.commit()
+
+        group_text = ""
+        if group_id:
+            cursor.execute("SELECT name FROM groups WHERE group_id = ?", (group_id,))
+            group_name = cursor.fetchone()['name']
+            group_text = f"\n👥 Група: {group_name}"
+
+        type_names = {
+            'once': '🔔 Разове',
+            'monthly': '🔄 Щомісячне',
+            'yearly': '📅 Щорічне'
+        }
+
+        message = (
+            f"✅ <b>Нагадування збережено!</b>\n\n"
+            f"📅 Дата: {format_date(data['date'])}\n"
+            f"📝 Текст: {data['text']}\n"
+            f"🔔 Тип: {type_names.get(data['type'])}{group_text}"
+        )
+
+        # Кнопки після створення
+        keyboard = [
+            [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if query:
+            await query.edit_message_text(message, parse_mode="HTML", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(message, parse_mode="HTML", reply_markup=reply_markup)
+
+    finally:
+        conn.close()
+        # ✅ ОЧИЩУЄМО context.user_data
+        for key in ['reminder_date', 'reminder_text', 'reminder_type']:
+            if key in context.user_data:
+                del context.user_data[key]
+
+
+async def process_save_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору куди зберегти"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    data = query.data
+
+    if data == "save_personal":
+        # Особисте нагадування
+        await save_reminder(update, context, user_id, None)
+    elif data.startswith("save_group_"):
+        # Групове нагадування — отримуємо ID групи з callback_data
+        group_id = int(data.replace("save_group_", ""))
+        await save_reminder(update, context, user_id, group_id)
+
+    return ConversationHandler.END
+
+
+def get_type_name(type_code):
+    """Отримання назви типу"""
+    names = {
+        'once': 'Разове',
+        'monthly': 'Щомісячне',
+        'yearly': 'Щорічне'
+    }
+    return names.get(type_code, type_code)
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування командою /cancel"""
+    # ✅ ОЧИЩУЄМО context.user_data
+    for key in ['reminder_date', 'reminder_text', 'reminder_type']:
+        if key in context.user_data:
+            del context.user_data[key]
+
+    await update.message.reply_text("❌ Додавання скасовано.")
+    return ConversationHandler.END
+
+
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування при натисканні інших кнопок"""
+    query = update.callback_query
+    await query.answer()
+
+    # ✅ ОЧИЩУЄМО context.user_data
+    for key in ['reminder_date', 'reminder_text', 'reminder_type']:
+        if key in context.user_data:
+            del context.user_data[key]
+
+    # Повертаємося в меню
+    await query.edit_message_text(
+        "❌ Додавання скасовано.\n\n"
+        "🏠 <b>Головне меню</b>\n\nОберіть дію:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+            [InlineKeyboardButton("➕ Додати нагадування", callback_data="add_reminder")],
+            [InlineKeyboardButton("👥 Особисті ▼", callback_data="switch_context")],
+            [InlineKeyboardButton("⚙️ Налаштування", callback_data="settings")],
+        ])
+    )
+    return ConversationHandler.END
+
+
+async def quick_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Швидке додавання: /add 18.04 Текст нагадування"""
+    user_id = update.effective_user.id
+
+    # Отримуємо аргументи команди
+    args = context.args
+
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "❌ <b>Невірний формат!</b>\n\n"
+            "Використовуйте:\n"
+            "<code>/add ДД.ММ Текст нагадування</code>\n\n"
+            "Приклад:\n"
+            "<code>/add 15.05 Оплатити інтернет</code>\n"
+            "<code>/add 15.05.2026 Зустріч з лікарем</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    # З'єднуємо всі аргументи в один текст
+    full_text = " ".join(args)
+
+    # Парсимо дату
+    date_obj, reminder_text = parse_date_input(full_text)
+
+    if not date_obj or not reminder_text:
+        await update.message.reply_text(
+            "❌ <b>Не вдалося розпізнати дату!</b>\n\n"
+            "Використовуйте формат:\n"
+            "<code>/add ДД.ММ Текст</code>\n"
+            "Приклад: <code>/add 15.05 Оплатити інтернет</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    # Перевірка чи дата не в минулому
+    from datetime import date
+    today = date.today()
+    if date_obj < today:
+        await update.message.reply_text(
+            "❌ <b>Дата в минулому!</b>\n"
+            f"Ви ввели: {format_date(date_obj)}\n"
+            "Введіть майбутню дату.",
+            parse_mode="HTML"
+        )
+        return
+
+    # ✅ ЗБЕРІГАЄМО В context.user_data
+    context.user_data['reminder_date'] = date_obj
+    context.user_data['reminder_text'] = reminder_text
+
+    # Питаємо тип нагадування
+    keyboard = [
+        [InlineKeyboardButton("🔔 Разове", callback_data="type_once")],
+        [InlineKeyboardButton("🔄 Щомісячне", callback_data="type_monthly")],
+        [InlineKeyboardButton("📅 Щорічне", callback_data="type_yearly")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"📅 <b>Дата:</b> {format_date(date_obj)}\n"
+        f"📝 <b>Текст:</b> {reminder_text}\n\n"
+        f"Оберіть тип нагадування:",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+    # Важливо: повертаємо стан для ConversationHandler
+    return WAITING_FOR_REMINDER_TYPE
+
+
+# ==================== ШВИДКЕ ДОДАВАННЯ ТЕКСТОМ (Фаза 3) ====================
+
+async def process_quick_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """
+    Швидке додавання нагадування з тексту
+    Спочатку розпізнає дату, потім питає: особисте чи групове
+    """
+    from utils import parse_date_input, format_date
+    from database import get_db_connection
+    from datetime import date
+
+    # Перевіряємо чи це взагалі схоже на нагадування
+    if not looks_like_reminder(text):
+        return False
+
+    # Парсимо дату та текст
+    date_obj, reminder_text = parse_date_input(text)
+
+    if not date_obj or not reminder_text:
+        return False
+
+    # Перевірка що дата не в минулому
+    today = date.today()
+    if date_obj < today:
+        await update.message.reply_text(
+            f"❌ <b>Дата в минулому!</b>\n"
+            f"Ви ввели: {format_date(date_obj)}\n"
+            f"Введіть майбутню дату.",
+            parse_mode="HTML"
+        )
+        return True  # Повертаємо True бо це було нагадування, просто невірна дата
+
+    # ✅ ЗБЕРІГАЄМО ДАНІ В КОНТЕКСТІ для наступного кроку
+    context.user_data['quick_date'] = date_obj
+    context.user_data['quick_text'] = reminder_text
+
+    # Отримуємо список груп користувача
+    user_id = update.effective_user.id
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT g.group_id, g.name 
+            FROM groups g
+            JOIN group_members gm ON g.group_id = gm.group_id
+            WHERE gm.user_id = ?
+            ORDER BY g.name
+        """, (user_id,))
+
+        user_groups = cursor.fetchall()
+    finally:
+        conn.close()
+
+    # Формуємо кнопки вибору
+    keyboard = []
+
+    # Завжди є опція "Особисте"
+    keyboard.append([InlineKeyboardButton("👤 Особисте нагадування", callback_data="quick_personal")])
+
+    # Додаємо групи користувача
+    for group in user_groups:
+        keyboard.append(
+            [InlineKeyboardButton(f"👥 {group['name']}", callback_data=f"quick_group_{group['group_id']}")])
+
+    # Кнопка скасування
+    keyboard.append([InlineKeyboardButton("❌ Скасувати", callback_data="quick_cancel")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Показуємо запит на вибір
+    await update.message.reply_text(
+        f"📅 <b>Дата:</b> {format_date(date_obj)}\n"
+        f"📝 <b>Текст:</b> {reminder_text}\n\n"
+        f"<b>Куди зберегти?</b>",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+    return True
+
+async def process_quick_personal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Збереження швидкого нагадування як особистого"""
+    query = update.callback_query
+    await query.answer()
+
+    # Отримуємо дані з контексту
+    date_obj = context.user_data.get('quick_date')
+    reminder_text = context.user_data.get('quick_text')
+
+    if not date_obj or not reminder_text:
+        await query.edit_message_text("❌ Помилка: дані не знайдено. Спробуйте ще раз.")
+        return
+
+    user_id = update.effective_user.id
+
+    # Зберігаємо в БД
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT INTO reminders (user_id, group_id, text, next_date, original_day, type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            None,  # Особисте
+            reminder_text,
+            date_obj,
+            None,
+            'once'
+        ))
+        conn.commit()
+
+        await query.edit_message_text(
+            f"✅ <b>Нагадування додано!</b>\n\n"
+            f"📅 Дата: {format_date(date_obj)}\n"
+            f"📝 Текст: {reminder_text}\n"
+            f"👤 Особисте | 🔔 Разове",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+            ])
+        )
+
+    finally:
+        conn.close()
+        # Очищаємо контекст
+        for key in ['quick_date', 'quick_text']:
+            if key in context.user_data:
+                del context.user_data[key]
+
+
+async def process_quick_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Збереження швидкого нагадування в групу"""
+    query = update.callback_query
+    await query.answer()
+
+    # Отримуємо ID групи з callback_data
+    data = query.data
+    group_id = int(data.replace("quick_group_", ""))
+
+    # Отримуємо дані з контексту
+    date_obj = context.user_data.get('quick_date')
+    reminder_text = context.user_data.get('quick_text')
+
+    if not date_obj or not reminder_text:
+        await query.edit_message_text("❌ Помилка: дані не знайдено. Спробуйте ще раз.")
+        return
+
+    user_id = update.effective_user.id
+
+    # Знаходимо назву групи
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT name FROM groups WHERE group_id = ?", (group_id,))
+        group = cursor.fetchone()
+
+        if not group:
+            await query.edit_message_text("❌ Помилка: групу не знайдено.")
+            return
+
+        # Зберігаємо в БД
+        cursor.execute("""
+            INSERT INTO reminders (user_id, group_id, text, next_date, original_day, type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            group_id,
+            reminder_text,
+            date_obj,
+            None,
+            'once'
+        ))
+        conn.commit()
+
+        await query.edit_message_text(
+            f"✅ <b>Нагадування додано!</b>\n\n"
+            f"📅 Дата: {format_date(date_obj)}\n"
+            f"📝 Текст: {reminder_text}\n"
+            f"👥 Група: {group['name']} | 🔔 Разове",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Нагадування групи", callback_data="my_reminders")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+            ])
+        )
+
+    finally:
+        conn.close()
+        # Очищаємо контекст
+        for key in ['quick_date', 'quick_text']:
+            if key in context.user_data:
+                del context.user_data[key]
+
+
+async def process_quick_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування швидкого додавання"""
+    query = update.callback_query
+    await query.answer()
+
+    # Очищаємо контекст
+    for key in ['quick_date', 'quick_text']:
+        if key in context.user_data:
+            del context.user_data[key]
+
+    await query.edit_message_text(
+        "❌ Додавання скасовано.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+        ])
+    )
+
+# ConversationHandler для додавання нагадування
+add_reminder_conv = ConversationHandler(
+    entry_points=[
+        CommandHandler("add", quick_add_command),
+        CallbackQueryHandler(add_reminder_start, pattern="^add_reminder$")
+    ],
+    states={
+        WAITING_FOR_REMINDER_TEXT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, process_reminder_text),
+            CallbackQueryHandler(add_reminder_start, pattern="^add_reminder$")
+        ],
+        WAITING_FOR_REMINDER_TYPE: [
+            CallbackQueryHandler(process_reminder_type, pattern="^type_"),
+            CallbackQueryHandler(add_reminder_start, pattern="^add_reminder$")
+        ],
+        WAITING_FOR_CONFIRMATION: [
+            CallbackQueryHandler(process_save_location, pattern="^save_personal$"),
+            CallbackQueryHandler(process_save_location, pattern="^save_group_"),
+            CallbackQueryHandler(add_reminder_start, pattern="^add_reminder$")
+        ],
+    },
+    fallbacks=[
+        CommandHandler("cancel", cancel),
+        CallbackQueryHandler(cancel_callback, pattern="^(back_to_menu|my_reminders|settings|switch_context)$")
+    ],
+    per_message=False
+)
+</file>
+
+<file path="__init__.py">
+
+</file>
+
+<file path=".gitignore">
+# Секретні дані
+.env
+
+# База даних
+*.db
+
+# Python кеш
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Віртуальні середовища (всі варіанти)
+venv/
+env/
+.venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+</file>
+
+<file path="config.py">
+# config.py - Конфігурація бота
+
+import os
+from dotenv import load_dotenv
+
+# Завантажуємо змінні з файлу .env
+load_dotenv()
+
+# Отримуємо значення з змінних середовища
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
+# Перевіряємо, чи всі дані завантажилися
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN не знайдено! Перевірте файл .env")
+if not ACCESS_PASSWORD:
+    raise ValueError("❌ ACCESS_PASSWORD не знайдено! Перевірте файл .env")
+
+# Часовий пояс
+TIMEZONE = "Europe/Kyiv"
+
+# Ліміти
+MAX_GROUPS_PER_USER = 3
+MAX_MEMBERS_PER_GROUP = 10
+MAX_TEXT_LENGTH = 200
+MAX_GROUP_NAME_LENGTH = 30
+
+# Backup налаштування
+BACKUP_TIME = (6, 30)  # 6:30 UTC (після нагадувань о 6:00)
+BACKUP_DAYS = (0, 1, 2, 3, 4, 5, 6)  # Щодня (0=понеділок, 6=неділя)
+
+# Шлях до бази даних для backup
+DB_PATH = "memoremindme.db"
+</file>
+
+<file path="database.py">
+# database.py - Робота з базою даних SQLite
+
+import sqlite3
+import os
+from datetime import datetime
+
+import functools
+import logging
+from telegram import Bot
+
+logger = logging.getLogger(__name__)
+
+# Глобальна змінна для бота (для сповіщень адміна)
+_bot_instance = None
+
+def set_bot_instance(bot: Bot):
+    """Встановлює екземпляр бота для сповіщень адміна"""
+    global _bot_instance
+    _bot_instance = bot
+
+DB_PATH = "memoremindme.db"
+
+# ДОДАЙ на початку файлу після імпортів
+from datetime import datetime, timedelta
+
+# Словник для rate limiting алертів: error_hash -> last_sent_time
+_alert_cooldown = {}
+ALERT_COOLDOWN_MINUTES = 5  # Не спамити однаковими помилками частіше ніж раз в 5 хв
+
+
+def _get_error_hash(error_message: str) -> str:
+    """Створює простий хеш помилки для групування схожих"""
+    # Беремо перші 50 символів + тип помилки
+    return error_message[:50].lower().strip()
+
+
+async def notify_admin_on_error(error_message: str, exception_details: str = ""):
+    """
+    Надсилає сповіщення адміністратору про помилку в базі даних
+    З rate limiting — не спамить однаковими помилками
+    """
+    from config import ADMIN_ID
+
+    if _bot_instance is None:
+        logger.warning("Бот не ініціалізовано, не можу надіслати сповіщення адміну")
+        return
+
+    # Перевіряємо cooldown для цієї помилки
+    error_hash = _get_error_hash(error_message)
+    now = datetime.now()
+    last_sent = _alert_cooldown.get(error_hash)
+
+    if last_sent and (now - last_sent).total_seconds() < ALERT_COOLDOWN_MINUTES * 60:
+        logger.info(f"⏱ Алерт для помилки '{error_hash}' пропущено (cooldown)")
+        return
+
+    try:
+        full_message = (
+            f"🚨 <b>Помилка в базі даних!</b>\n\n"
+            f"❌ {error_message}\n"
+        )
+
+        if exception_details:
+            # Обмежуємо довжину деталей
+            if len(exception_details) > 400:
+                exception_details = exception_details[:400] + "..."
+            full_message += f"\n📝 Деталі:\n<code>{exception_details}</code>"
+
+        await _bot_instance.send_message(
+            chat_id=ADMIN_ID,
+            text=full_message,
+            parse_mode="HTML"
+        )
+
+        # Записуємо час відправки
+        _alert_cooldown[error_hash] = now
+        logger.info("✅ Адміністратора повідомлено про помилку")
+
+    except Exception as e:
+        logger.error(f"Не вдалося надіслати сповіщення адміну: {e}")
+
+
+def with_error_notification(func):
+    """
+    Декоратор для автоматичного сповіщення адміна про помилки SQL
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            error_msg = f"Помилка в {func.__name__}: {str(e)}"
+            logger.error(error_msg)
+
+            # Асинхронно сповіщаємо адміна (не блокуємо основний код)
+            if _bot_instance:
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(notify_admin_on_error(error_msg, str(e)))
+                except Exception as async_error:
+                    logger.error(f"Помилка при створенні async задачі: {async_error}")
+
+            # Перекидаємо виняток далі
+            raise
+
+    return wrapper
+
+def init_db():
+    """Створення таблиць при першому запуску"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Таблиця користувачів — ДОДАЄМО НОВІ ПОЛЯ
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            chat_id INTEGER UNIQUE NOT NULL,
+            username TEXT,
+            is_authorized BOOLEAN DEFAULT 0,
+            timezone TEXT DEFAULT 'Europe/Kyiv',
+            reminder_time TEXT DEFAULT '09:00',  -- ✅ НОВЕ: час нагадувань (HH:MM)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Таблиця груп
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS groups (
+            group_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            code TEXT UNIQUE NOT NULL,
+            created_by INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users (user_id)
+        )
+    """)
+
+    # Таблиця учасників груп
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS group_members (
+            group_id INTEGER,
+            user_id INTEGER,
+            is_admin BOOLEAN DEFAULT 0,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (group_id, user_id),
+            FOREIGN KEY (group_id) REFERENCES groups (group_id),
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+    """)
+
+    # Таблиця нагадувань
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            reminder_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            group_id INTEGER,
+            text TEXT NOT NULL,
+            next_date DATE NOT NULL,
+            original_day INTEGER,
+            type TEXT CHECK(type IN ('once', 'monthly', 'yearly')) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (user_id),
+            FOREIGN KEY (group_id) REFERENCES groups (group_id)
+        )
+    """)
+
+    # Індекси
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reminders_next_date ON reminders(next_date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user_id ON reminders(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reminders_group_id ON reminders(group_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_group_members_user_id ON group_members(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_group_members_group_id ON group_members(group_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_groups_code ON groups(code)")
+
+    conn.commit()
+    conn.close()
+    print("✅ База даних ініціалізована (з індексами та налаштуваннями користувача)")
+
+
+def get_db_connection():
+    """Повертає з'єднання з базою даних"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# Функції для роботи з користувачами
+@with_error_notification
+def add_user(user_id, chat_id, username=None):
+    """Додавання нового користувача"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (user_id, chat_id, username)
+            VALUES (?, ?, ?)
+        """, (user_id, chat_id, username))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@with_error_notification
+def authorize_user(user_id):
+    """Авторизація користувача"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE users SET is_authorized = 1 WHERE user_id = ?
+        """, (user_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def is_user_authorized(user_id):
+    """Перевірка чи авторизований користувач"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT is_authorized FROM users WHERE user_id = ?
+        """, (user_id,))
+        result = cursor.fetchone()
+        return result and result['is_authorized'] == 1
+    finally:
+        conn.close()
+
+@with_error_notification
+def unauthorize_user(user_id):
+    """Розавторизація користувача (вихід)"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE users SET is_authorized = 0 WHERE user_id = ?
+        """, (user_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+def get_user(user_id):
+    """Отримання інформації про користувача"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT * FROM users WHERE user_id = ?
+        """, (user_id,))
+        return cursor.fetchone()
+    finally:
+        conn.close()
+
+
+def get_user_settings(user_id):
+    """Отримання налаштувань користувача"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT timezone, reminder_time FROM users WHERE user_id = ?
+        """, (user_id,))
+        result = cursor.fetchone()
+
+        if result:
+            return {
+                'timezone': result['timezone'] or 'Europe/Kyiv',
+                'reminder_time': result['reminder_time'] or '09:00'
+            }
+        return {'timezone': 'Europe/Kyiv', 'reminder_time': '09:00'}
+    finally:
+        conn.close()
+
+
+@with_error_notification
+def update_user_timezone(user_id, timezone):
+    """Оновлення часового поясу користувача"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE users SET timezone = ? WHERE user_id = ?
+        """, (timezone, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+@with_error_notification
+def update_user_reminder_time(user_id, time_str):
+    """Оновлення часу нагадувань користувача (формат HH:MM)"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE users SET reminder_time = ? WHERE user_id = ?
+        """, (time_str, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+</file>
+
+<file path="debug_main.py">
+#!/usr/bin/env python3
+import sys
+import traceback
+
+print("🔄 Починаємо діагностику...")
+
+try:
+    print("1️⃣ Імпорт config...")
+    from config import BOT_TOKEN, ACCESS_PASSWORD
+
+    print(f"   ✅ BOT_TOKEN: {BOT_TOKEN[:20]}...")
+
+    print("2️⃣ Імпорт database...")
+    from database import init_db, add_user, authorize_user, is_user_authorized
+
+    print("   ✅ database OK")
+
+    print("3️⃣ Імпорт utils...")
+    from utils import parse_date_input, format_date
+
+    print("   ✅ utils OK")
+
+    print("4️⃣ Імпорт handlers.reminders...")
+    from handlers.reminders import add_reminder_conv
+
+    print("   ✅ reminders OK")
+
+    print("5️⃣ Імпорт handlers.list...")
+    from handlers.list import list_handlers, list_all
+
+    print("   ✅ list OK")
+
+    print("6️⃣ Імпорт telegram...")
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+    print("   ✅ telegram OK")
+
+    print("7️⃣ Імпорт telegram.ext...")
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        ContextTypes,
+        ConversationHandler,
+        MessageHandler,
+        CallbackQueryHandler,
+        filters,
+    )
+
+    print("   ✅ telegram.ext OK")
+
+    print("\n✅ Всі імпорти успішні!")
+    print("🚀 Можна запускати main.py")
+
+except Exception as e:
+    print(f"\n❌ ПОМИЛКА: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+</file>
+
+<file path="main.py">
+# main.py - Головний файл бота MemoremindMe (спрощена версія)
+
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
+
+from config import BOT_TOKEN, ACCESS_PASSWORD, ADMIN_ID
+from database import init_db, add_user, authorize_user, is_user_authorized
+from handlers.reminders import add_reminder_conv
+from handlers.list import list_handlers
+from handlers.groups import groups_handlers
+from handlers.delete import delete_handlers
+from handlers.edit import edit_handlers
+from notifications import setup_reminder_jobs
+from handlers.backup import backup_handler, auto_backup_job
+from database import set_bot_instance
+from utils import looks_like_reminder, check_cooldown  # ← ДОДАНО check_cooldown
+from handlers.reminders import process_quick_reminder, process_quick_personal, process_quick_group, process_quick_cancel
+
+# Налаштування логування
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+
+# ==================== КОМАНДИ ====================
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /start - початок роботи з ботом"""
+    user = update.effective_user
+    user_id = user.id
+    chat_id = update.effective_chat.id
+    username = user.username
+
+    # Додаємо користувача в БД (якщо немає)
+    add_user(user_id, chat_id, username)
+
+    # Перевіряємо авторизацію
+    if is_user_authorized(user_id):
+        # Вже авторизований - показуємо меню
+        await show_main_menu(update, context)
+    else:
+        # Потрібна авторизація
+        await update.message.reply_text(
+            "🔐 <b>Вітаю в MemoremindMe!</b>\n\n"
+            "Це бот для нагадування важливих дат.\n"
+            "Для продовження введіть пароль доступу:",
+            parse_mode="HTML"
+        )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /help або /about — довідка про бота"""
+    await show_about(update, context)
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування будь-якої операції"""
+    # Очищаємо всі тимчасові дані
+    keys_to_clear = ['reminder_date', 'reminder_text', 'reminder_type', 'delete_reminder_id', 'delete_is_admin']
+    for key in keys_to_clear:
+        if key in context.user_data:
+            del context.user_data[key]
+
+    await update.message.reply_text(
+        "❌ Операцію скасовано.\n\n"
+        "🏠 <b>Головне меню</b>\n\nОберіть дію:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+            [InlineKeyboardButton("➕ Додати нагадування", callback_data="add_reminder")],
+            [InlineKeyboardButton("👥 Групи", callback_data="groups_menu")],
+            [InlineKeyboardButton("⚙️ Налаштування", callback_data="settings")],
+        ])
+    )
+
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /menu - показати головне меню"""
+    await show_main_menu(update, context)
+
+
+# ==================== МЕНЮ ====================
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ головного меню"""
+    keyboard = [
+        [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+        [InlineKeyboardButton("➕ Додати нагадування", callback_data="add_reminder")],
+        [InlineKeyboardButton("👥 Групи", callback_data="groups_menu")],
+        [InlineKeyboardButton("⚙️ Налаштування", callback_data="settings")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    message_text = "🏠 <b>Головне меню</b>\n\nОберіть дію:"
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            message_text, parse_mode="HTML", reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            message_text, parse_mode="HTML", reply_markup=reply_markup
+        )
+
+
+async def show_reminders_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ меню перегляду нагадувань"""
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("📅 Сьогодні", callback_data="list_today")],
+        [InlineKeyboardButton("📆 Цей тиждень", callback_data="list_week")],
+        [InlineKeyboardButton("🗓️ Цей місяць", callback_data="list_month")],
+        [InlineKeyboardButton("📋 Всі", callback_data="list_all")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        "📋 <b>Мої нагадування</b>\n\nОберіть період:",
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+    )
+
+
+async def show_groups_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ меню управління групами"""
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [
+        [InlineKeyboardButton("➕ Створити групу", callback_data="create_group")],
+        [InlineKeyboardButton("🔗 Приєднатися до групи", callback_data="join_group")],
+        [InlineKeyboardButton("📋 Мої групи", callback_data="my_groups")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        "👥 <b>Групи</b>\n\n"
+        "Оберіть дію:",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+
+async def show_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ меню налаштувань"""
+    user_id = update.effective_user.id
+
+    # Формуємо базові кнопки
+    keyboard = [
+        [InlineKeyboardButton("ℹ️ Про бота", callback_data="about_bot")],  # ← НОВА КНОПКА
+        [InlineKeyboardButton("🚪 Вийти з акаунта", callback_data="logout")],
+    ]
+
+    # Додаємо кнопку backup тільки для адміна
+    if user_id == ADMIN_ID:
+        keyboard.insert(0, [InlineKeyboardButton("🗄 Скачати backup", callback_data="download_backup")])
+
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        "⚙️ <b>Налаштування</b>\n\n"
+        "Оберіть дію:",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+
+async def show_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ детальної інформації про бота"""
+    query = update.callback_query
+
+    about_text = (
+        "🤖 <b>MemoRemindMe — твій помічник з нагадуваннями</b>\n\n"
+
+        "📌 <b>Що вміє бот:</b>\n"
+        "• Створювати разові, щомісячні та щорічні нагадування\n"
+        "• Розпізнавати дати українською: «завтра», «через 3 дні», «15 травня»\n"
+        "• Працювати з групами — спільні нагадування для сім'ї, роботи, друзів\n"
+        "• Надсилати щоденні нагадування о 8:00 ранку\n"
+        "• Формувати тижневі та місячні звіти\n\n"
+
+        "⚡ <b>Швидкі команди:</b>\n"
+        "• <code>завтра тест</code> — нагадування на завтра\n"
+        "• <code>через 3 дні зустріч</code> — через 3 дні\n"
+        "• <code>15 травня день народження</code> — конкретна дата\n"
+        "• <code>15.05 Оплатити інтернет</code> — класичний формат\n\n"
+
+        "📝 <b>Команди:</b>\n"
+        "/start — почати роботу\n"
+        "/menu — головне меню\n"
+        "/add — додати нагадування\n"
+        "/today — сьогодні\n"
+        "/week — цей тиждень\n"
+        "/month — цей місяць\n"
+        "/all — всі нагадування\n"
+        "/help або /about — ця довідка\n"
+        "/cancel — скасувати дію\n\n"
+
+        "👥 <b>Групи:</b>\n"
+        "• Створіть групу та поділіться кодом запрошення\n"
+        "• До 10 учасників у групі\n"
+        "• Спільні нагадування для всіх учасників\n"
+        "• Адмін керує групою та може видаляти її\n\n"
+
+        "🔔 <b>Типи нагадувань:</b>\n"
+        "🔔 Разове — одноразове нагадування\n"
+        "🔄 Щомісячне — повторюється щомісяця (наприклад, оплата рахунків)\n"
+        "📅 Щорічне — повторюється щороку (наприклад, дні народження)\n\n"
+
+        "💡 <b>Порада:</b> Просто напишіть мені дату та подію — "
+        "я все зрозумію і запитаю, куди зберегти!\n\n"
+
+        "🆕 <b>Версія:</b> 1.0 | 2026"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🔙 Назад до налаштувань", callback_data="settings")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if query:
+        await query.answer()
+        await query.edit_message_text(about_text, parse_mode="HTML", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(about_text, parse_mode="HTML", reply_markup=reply_markup)
+
+# ==================== ОБРОБНИКИ ПОВІДОМЛЕНЬ ====================
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка текстових повідомлень від користувача"""
+
+    # Перевіряємо чи є текст
+    if not update.message or not update.message.text:
+        return
+
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+
+    # Якщо користувач не авторизований - перевіряємо пароль
+    if not is_user_authorized(user_id):
+        if text == ACCESS_PASSWORD:
+            # Правильний пароль
+            authorize_user(user_id)
+            await update.message.reply_text(
+                "✅ <b>Авторизація успішна!</b>\n\n"
+                "Тепер ви можете користуватися ботом.\n\n"
+                "Просто напишіть: <code>завтра тест</code> або <code>15 травня день народження</code>",
+                parse_mode="HTML"
+            )
+            await show_main_menu(update, context)
+        else:
+            # Неправильний пароль
+            await update.message.reply_text(
+                "❌ <b>Невірний пароль!</b>\n\n"
+                "Спробуйте ще раз або зверніться до адміністратора.",
+                parse_mode="HTML"
+            )
+        return
+
+    # === ШВИДКЕ ДОДАВАННЯ ТЕКСТОМ ===
+    # Перевіряємо чи це нагадування (завтра, через 3 дні, 15 травня, тощо)
+    if looks_like_reminder(text):
+        success = await process_quick_reminder(update, context, text)
+        if success:
+            return  # Оброблено як нагадування
+
+    # === ЗВИЧАЙНИЙ ЧАТ ===
+    # Не схоже на нагадування — обробляємо як звичайне повідомлення
+    await handle_chat_message(update, context, text)
+
+
+async def handle_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """
+    Обробка звичайних повідомлень (не нагадувань)
+    Відповіді на привітання, допомога, тощо
+    """
+    text_lower = text.lower().strip()
+
+    # Привітання
+    if any(word in text_lower for word in
+           ["привіт", "hello", "hi", "hey", "добрий день", "добрий вечір", "доброго ранку"]):
+        await update.message.reply_text(
+            "Привіт! 👋\n\n"
+            "Я бот для нагадувань важливих дат.\n"
+            "Просто напиши мені: <code>завтра тест</code> або <code>15 травня день народження</code>\n\n"
+            "Або використовуй /menu для навігації",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+                [InlineKeyboardButton("➕ Додати нагадування", callback_data="add_reminder")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+            ])
+        )
+        return
+
+    # Допомога
+    if any(word in text_lower for word in ["допомога", "help", "помощь", "підказка", "як користуватися"]):
+        await help_command(update, context)
+        return
+
+    # Меню
+    if any(word in text_lower for word in ["меню", "menu", "панель", "команды", "команди"]):
+        await show_main_menu(update, context)
+        return
+
+    # Подяка
+    if any(word in text_lower for word in ["дякую", "спасибі", "спасибо", "дякую тобі", "thanks", "thank you"]):
+        await update.message.reply_text(
+            "Завжди радий допомогти! 😊\n\n"
+            "Напиши нагадування прямо в чат або використовуй меню.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+            ])
+        )
+        return
+
+    # Невідомий текст — пропонуємо меню
+    await update.message.reply_text(
+        "🤔 Я не зрозумів це повідомлення...\n\n"
+        "Якщо ти хочеш додати нагадування, спробуй:\n"
+        "• <code>завтра тест</code>\n"
+        "• <code>через 3 дні зустріч</code>\n"
+        "• <code>15 травня день народження</code>\n"
+        "• <code>15.05 оплатити інтернет</code>\n\n"
+        "Або використовуй меню:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 Мої нагадування", callback_data="my_reminders")],
+            [InlineKeyboardButton("➕ Додати нагадування", callback_data="add_reminder")],
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="back_to_menu")]
+        ])
+    )
+
+
+# ==================== ОБРОБНИКИ КНОПОК ====================
+
+async def logout_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вихід користувача з акаунта"""
+    from database import unauthorize_user
+
+    user_id = update.effective_user.id
+    unauthorize_user(user_id)
+
+    # Очищаємо контекст
+    context.user_data.clear()
+
+    await update.callback_query.edit_message_text(
+        "🚪 <b>Ви вийшли з акаунта</b>\n\n"
+        "Для повторного входу введіть пароль:",
+        parse_mode="HTML"
+    )
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка натискання кнопок"""
+    query = update.callback_query
+    data = query.data
+    user_id = update.effective_user.id
+
+    # Антиспам для всіх загальних кнопок
+    if not check_cooldown(user_id, f"btn_{data}", cooldown_seconds=1):
+        await query.answer("⏱ Занадто швидко!", show_alert=False)
+        return
+
+    await query.answer()
+
+    if data == "back_to_menu":
+        await show_main_menu(update, context)
+    elif data == "my_reminders":
+        await show_reminders_menu(update, context)
+    elif data == "settings":
+        await show_settings_menu(update, context)
+    elif data == "about_bot":
+        await show_about(update, context)
+    elif data == "logout":
+        await logout_user(update, context)
+    elif data == "groups_menu":
+        await show_groups_menu(update, context)
+
+    # Якщо кнопка не відома — НЕ відповідаємо, нехай оброблять інші handlers
+
+
+# ==================== ЗАПУСК ====================
+
+def main():
+    """Головна функція запуску бота"""
+    # Ініціалізуємо базу даних
+    print("🔄 Ініціалізація бази даних...")
+    init_db()
+
+    # Створюємо додаток
+    print("🔄 Запуск бота...")
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # ← ДОДАНО: Отримуємо job_queue
+    job_queue = application.job_queue
+
+    # Встановлюємо бота для сповіщень адміна про помилки БД
+    set_bot_instance(application.bot)
+
+    # Додаємо обробники
+    # 1. ConversationHandler для додавання нагадувань (ВАЖЛИВО: додати першим!)
+    application.add_handler(add_reminder_conv)
+
+    # 2. Команди
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("about", help_command))
+    application.add_handler(CommandHandler("menu", menu_command))
+    application.add_handler(CommandHandler("cancel", cancel_command))
+
+    # 3. Обробники списків нагадувань (конкретні pattern — мають бути ДО загального handler)
+    for handler in list_handlers:
+        application.add_handler(handler)
+
+    # 4. Обробники груп (ВАЖЛИВО: додати ДО загального обробника кнопок!)
+    for handler in groups_handlers:
+        application.add_handler(handler)
+
+    # 5. Обробники видалення (додаємо перед загальним обробником)
+    for handler in delete_handlers:
+        application.add_handler(handler)
+
+    # 5.5 Обробник backup (додаємо перед загальним обробником)
+    application.add_handler(backup_handler)
+
+    # 5.6 Обробники редагування (додаємо перед загальним обробником)
+    for handler in edit_handlers:
+        application.add_handler(handler)
+
+    # 6. Обробники швидкого додавання (вибір особисте/група)
+    application.add_handler(CallbackQueryHandler(process_quick_personal, pattern="^quick_personal$"))
+    application.add_handler(CallbackQueryHandler(process_quick_group, pattern="^quick_group_"))
+    application.add_handler(CallbackQueryHandler(process_quick_cancel, pattern="^quick_cancel$"))
+
+    # 7. Загальний обробник кнопок (тільки для конкретних кнопок)
+    application.add_handler(
+        CallbackQueryHandler(button_handler, pattern="^(back_to_menu|my_reminders|settings|about_bot|logout|groups_menu)$"))
+
+    # 8. Обробник текстових повідомлень (для пароля і швидкого додавання)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Налаштовуємо систему нагадувань
+    setup_reminder_jobs(application)
+
+    # ← ДОДАНО: Очистка старих кулдаунів кожні 10 хвилин
+    from utils import clear_old_cooldowns
+
+    job_queue.run_repeating(
+        callback=lambda context: clear_old_cooldowns(),
+        interval=600,  # 10 хвилин
+        first=600,
+        name="cleanup_cooldowns"
+    )
+
+    # Запускаємо бота
+    print("✅ Бот запущений! Натисніть Ctrl+C для зупинки.")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="notifications.py">
+# notifications.py - Система нагадувань о ~8:00 за Києвом (6:00 UTC)
+
+import logging
+from datetime import date, time, timedelta
+from telegram.error import TelegramError
+from database import get_db_connection
+from utils import format_date, get_next_month_date, get_next_year_date, get_week_dates
+from config import BACKUP_TIME, BACKUP_DAYS
+from handlers.backup import auto_backup_job
+
+
+logger = logging.getLogger(__name__)
+
+
+async def check_and_send_reminders(context):
+    """
+    Перевіряє нагадування на сьогодні і надсилає їх
+    Викликається о 6:00 UTC (~8:00 за Києвом взимку, ~9:00 влітку)
+
+    Для особистих нагадувань — відправляємо автору
+    Для групових нагадувань — відправляємо ВСІМ учасникам групи
+
+    Нагадування об'єднуються в одне повідомлення (макс 10 на повідомлення)
+    """
+    bot = context.bot
+    today = date.today()
+    logger.info(f"🔍 Перевірка нагадувань на {today}")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # === ЗБИРАЄМО ВСІ НАГАДУВАННЯ ДЛЯ КОЖНОГО КОРИСТУВАЧА ===
+
+        # Словник: user_id -> список нагадувань
+        user_reminders = {}
+
+        # 1. ОСОБИСТІ НАГАДУВАННЯ (group_id IS NULL)
+        cursor.execute("""
+            SELECT r.*, u.chat_id, NULL as group_name, u.user_id as receiver_id
+            FROM reminders r
+            JOIN users u ON r.user_id = u.user_id
+            WHERE r.next_date = ?
+            AND r.group_id IS NULL
+            AND u.is_authorized = 1
+        """, (today,))
+
+        for row in cursor.fetchall():
+            user_id = row['receiver_id']
+            if user_id not in user_reminders:
+                user_reminders[user_id] = {
+                    'chat_id': row['chat_id'],
+                    'reminders': []
+                }
+            user_reminders[user_id]['reminders'].append({
+                'text': row['text'],
+                'type': row['type'],
+                'group_name': None,
+                'is_personal': True,
+                'date_str': None
+            })
+
+        # 2. ГРУПОВІ НАГАДУВАННЯ (group_id IS NOT NULL)
+        # Спочатку знаходимо всі групові нагадування
+        cursor.execute("""
+            SELECT r.*, g.name as group_name, g.group_id
+            FROM reminders r
+            JOIN groups g ON r.group_id = g.group_id
+            WHERE r.next_date = ?
+            AND r.group_id IS NOT NULL
+        """, (today,))
+
+        group_reminders = cursor.fetchall()
+
+        # Для кожного групового нагадування знаходимо всіх учасників
+        for reminder in group_reminders:
+            group_id = reminder['group_id']
+
+            # Знаходимо всіх учасників групи
+            cursor.execute("""
+                SELECT u.user_id, u.chat_id
+                FROM users u
+                JOIN group_members gm ON u.user_id = gm.user_id
+                WHERE gm.group_id = ? AND u.is_authorized = 1
+            """, (group_id,))
+
+            members = cursor.fetchall()
+
+            # Додаємо нагадування кожному учаснику
+            for member in members:
+                user_id = member['user_id']
+                if user_id not in user_reminders:
+                    user_reminders[user_id] = {
+                        'chat_id': member['chat_id'],
+                        'reminders': []
+                    }
+                user_reminders[user_id]['reminders'].append({
+                    'text': reminder['text'],
+                    'type': reminder['type'],
+                    'group_name': reminder['group_name'],
+                    'is_personal': False,
+                    'date_str': None
+                })
+
+        # === ВІДПРАВЛЯЄМО ОБ'ЄДНАНІ ПОВІДОМЛЕННЯ ===
+        logger.info(f"📋 Знайдено нагадування для {len(user_reminders)} користувачів")
+
+        for user_id, data in user_reminders.items():
+            try:
+                title = f"📅 Нагадування на {format_date(today)}"
+                await send_combined_reminders(bot, data['chat_id'], data['reminders'], title, today)
+            except Exception as e:
+                logger.error(f"❌ Помилка відправки нагадувань користувачу {user_id}: {e}")
+
+        # === ОНОВЛЮЄМО ДАТИ НАГАДУВАНЬ (ТІЛЬКИ ОДИН РАЗ!) ===
+        # Особисті нагадування
+        cursor.execute("""
+            SELECT r.* FROM reminders r
+            JOIN users u ON r.user_id = u.user_id
+            WHERE r.next_date = ? AND r.group_id IS NULL AND u.is_authorized = 1
+        """, (today,))
+
+        for reminder in cursor.fetchall():
+            await update_reminder_date(cursor, conn, reminder)
+
+        # Групові нагадування (оновлюємо тільки один раз!)
+        cursor.execute("""
+            SELECT r.* FROM reminders r
+            JOIN groups g ON r.group_id = g.group_id
+            WHERE r.next_date = ? AND r.group_id IS NOT NULL
+        """, (today,))
+
+        for reminder in cursor.fetchall():
+            await update_reminder_date(cursor, conn, reminder)
+
+    finally:
+        conn.close()
+
+
+async def send_combined_reminders(bot, chat_id, reminders, title, date_obj=None, max_per_message=10):
+    """
+    Універсальна функція для відправки об'єднаних нагадувань
+    """
+    if not reminders:
+        empty_message = f"{title}\n\n✅ Немає запланованих нагадувань."
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=empty_message,
+                parse_mode="HTML"
+            )
+        except TelegramError as e:
+            logger.error(f"❌ Не вдалося надіслати: {e}")
+        return
+
+    type_emoji = {
+        'once': '🔔',
+        'monthly': '🔄',
+        'yearly': '📅'
+    }
+
+    total = len(reminders)
+    chunks = []
+    for i in range(0, total, max_per_message):
+        chunk = reminders[i:i + max_per_message]
+        chunks.append(chunk)
+
+    for chunk_index, chunk in enumerate(chunks):
+        start_num = chunk_index * max_per_message + 1
+        end_num = min((chunk_index + 1) * max_per_message, total)
+
+        if len(chunks) == 1:
+            message = f"{title}\n\n"
+        else:
+            message = f"{title} ({start_num}-{end_num} з {total})\n\n"
+
+        for reminder in chunk:
+            icon = type_emoji.get(reminder.get('type', 'once'), '🔔')
+
+            # Додаємо дату якщо є
+            date_prefix = ""
+            if reminder.get('date_str'):
+                date_prefix = f"{reminder['date_str']}: "
+
+            message += f"{icon} {date_prefix}{reminder['text']}"
+
+            # Додаємо позначку особисте/групове
+            if reminder.get('is_personal'):
+                message += "\n👤 Особисте"
+            elif reminder.get('group_name'):
+                message += f"\n👥 {reminder['group_name']}"
+
+            message += "\n\n"
+
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info(f"✅ Надіслано частину {chunk_index + 1}/{len(chunks)}")
+        except TelegramError as e:
+            logger.error(f"❌ Не вдалося надіслати: {e}")
+
+
+async def update_reminder_date(cursor, conn, reminder):
+    """
+    Оновлює дату нагадування (переносить на наступний раз)
+    """
+    if reminder['type'] == 'once':
+        cursor.execute(
+            "DELETE FROM reminders WHERE reminder_id = ?",
+            (reminder['reminder_id'],)
+        )
+        logger.info(f"🗑️ Разове нагадування {reminder['reminder_id']} видалено")
+
+    elif reminder['type'] == 'monthly':
+        current_date = date.fromisoformat(reminder['next_date'])
+        original_day = reminder['original_day'] or current_date.day
+        next_date = get_next_month_date(current_date, original_day)
+
+        cursor.execute(
+            "UPDATE reminders SET next_date = ? WHERE reminder_id = ?",
+            (next_date, reminder['reminder_id'])
+        )
+        logger.info(f"🔄 Щомісячне нагадування {reminder['reminder_id']} перенесено на {next_date}")
+
+    elif reminder['type'] == 'yearly':
+        current_date = date.fromisoformat(reminder['next_date'])
+        next_date = get_next_year_date(current_date)
+
+        cursor.execute(
+            "UPDATE reminders SET next_date = ? WHERE reminder_id = ?",
+            (next_date, reminder['reminder_id'])
+        )
+        logger.info(f"📅 Щорічне нагадування {reminder['reminder_id']} перенесено на {next_date}")
+
+    conn.commit()
+
+
+async def send_weekly_report(context):
+    """Надсилає звіт на тиждень щопонеділка"""
+    bot = context.bot
+    today = date.today()
+
+    # Тільки в понеділок
+    if today.weekday() != 0:
+        return
+
+    week_dates = get_week_dates(today)
+    monday = week_dates[0]
+    sunday = week_dates[6]
+
+    logger.info(f"📊 Формування тижневого звіту: {monday} - {sunday}")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT user_id, chat_id FROM users WHERE is_authorized = 1
+        """)
+        users = cursor.fetchall()
+
+        for user in users:
+            user_id = user['user_id']
+            chat_id = user['chat_id']
+
+            # Отримуємо нагадування
+            cursor.execute("""
+                SELECT r.*, g.name as group_name
+                FROM reminders r
+                LEFT JOIN groups g ON r.group_id = g.group_id
+                WHERE (
+                    r.user_id = ?
+                    OR (
+                        r.group_id IS NOT NULL 
+                        AND r.group_id IN (
+                            SELECT group_id FROM group_members WHERE user_id = ?
+                        )
+                    )
+                )
+                AND r.next_date BETWEEN ? AND ?
+                ORDER BY r.next_date
+            """, (user_id, user_id, monday, sunday))
+
+            rows = cursor.fetchall()
+
+            # Конвертуємо в формат для send_combined_reminders
+            weekdays = {
+                0: 'понеділок',
+                1: 'вівторок',
+                2: 'середа',
+                3: 'четвер',
+                4: 'пʼятниця',
+                5: 'субота',
+                6: 'неділя'
+            }
+
+            reminders = []
+            for rem in rows:
+                rem_date = date.fromisoformat(rem['next_date'])
+                weekday_name = weekdays[rem_date.weekday()]
+                date_str = format_date(rem_date)
+
+                # Визначаємо чи особисте чи групове
+                is_personal = rem['group_id'] is None
+
+                reminders.append({
+                    'text': rem['text'],
+                    'type': rem['type'],
+                    'date_str': f"{date_str} ({weekday_name})",
+                    'group_name': rem['group_name'] if not is_personal else None,
+                    'is_personal': is_personal
+                })
+
+            # Формуємо заголовок
+            title = f"📆 <b>Звіт на тиждень</b>\n{format_date(monday)} — {format_date(sunday)}"
+
+            # Відправляємо
+            try:
+                await send_combined_reminders(bot, chat_id, reminders, title, max_per_message=10)
+                logger.info(f"📨 Тижневий звіт надіслано користувачу {user_id}")
+            except Exception as e:
+                logger.error(f"❌ Помилка відправки тижневого звіту користувачу {user_id}: {e}")
+
+    finally:
+        conn.close()
+
+
+async def send_monthly_report(context):
+    """Надсилає звіт на місяць 1-го числа"""
+    bot = context.bot
+    today = date.today()
+
+    # Тільки 1-го числа
+    if today.day != 1:
+        return
+
+    first_day = today.replace(day=1)
+    if today.month == 12:
+        last_day = today.replace(day=31)
+    else:
+        next_month = today.replace(month=today.month + 1, day=1)
+        last_day = next_month - timedelta(days=1)
+
+    logger.info(f"📊 Формування місячного звіту: {first_day} - {last_day}")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT user_id, chat_id FROM users WHERE is_authorized = 1
+        """)
+        users = cursor.fetchall()
+
+        months = {
+            1: 'Січень', 2: 'Лютий', 3: 'Березень', 4: 'Квітень',
+            5: 'Травень', 6: 'Червень', 7: 'Липень', 8: 'Серпень',
+            9: 'Вересень', 10: 'Жовтень', 11: 'Листопад', 12: 'Грудень'
+        }
+        month_name = months[today.month]
+
+        for user in users:
+            user_id = user['user_id']
+            chat_id = user['chat_id']
+
+            # Отримуємо нагадування
+            cursor.execute("""
+                SELECT r.*, g.name as group_name
+                FROM reminders r
+                LEFT JOIN groups g ON r.group_id = g.group_id
+                WHERE (
+                    r.user_id = ?
+                    OR (
+                        r.group_id IS NOT NULL 
+                        AND r.group_id IN (
+                            SELECT group_id FROM group_members WHERE user_id = ?
+                        )
+                    )
+                )
+                AND r.next_date BETWEEN ? AND ?
+                ORDER BY r.next_date
+            """, (user_id, user_id, first_day, last_day))
+
+            rows = cursor.fetchall()
+
+            # Конвертуємо в формат для send_combined_reminders
+            reminders = []
+            for rem in rows:
+                rem_date = date.fromisoformat(rem['next_date'])
+                date_str = format_date(rem_date)
+
+                # Визначаємо чи особисте чи групове
+                is_personal = rem['group_id'] is None
+
+                reminders.append({
+                    'text': rem['text'],
+                    'type': rem['type'],
+                    'date_str': date_str,
+                    'group_name': rem['group_name'] if not is_personal else None,
+                    'is_personal': is_personal
+                })
+
+            # Формуємо заголовок
+            title = f"🗓️ <b>Звіт на {month_name} {today.year}</b>"
+
+            # Відправляємо
+            try:
+                await send_combined_reminders(bot, chat_id, reminders, title, max_per_message=10)
+                logger.info(f"📨 Місячний звіт надіслано користувачу {user_id}")
+            except Exception as e:
+                logger.error(f"❌ Помилка відправки місячного звіту користувачу {user_id}: {e}")
+
+    finally:
+        conn.close()
+
+
+def setup_reminder_jobs(application):
+    """
+    Налаштовує автоматичну перевірку нагадувань
+    """
+    from telegram.ext import JobQueue
+
+    job_queue = application.job_queue
+
+    # 1. Місячний звіт — 6:01 UTC (1-го числа)
+    job_queue.run_daily(
+        callback=monthly_report_job,
+        time=time(hour=6, minute=1),
+        name="monthly_report"
+    )
+
+    # 2. Тижневий звіт — 6:02 UTC (щопонеділка)
+    job_queue.run_daily(
+        callback=weekly_report_job,
+        time=time(hour=6, minute=2),
+        days=(0,),  # Понеділок
+        name="weekly_report"
+    )
+
+    # 3. Щоденні нагадування — 6:03 UTC
+    job_queue.run_daily(
+        callback=daily_reminders_job,
+        time=time(hour=6, minute=3),
+        name="daily_reminders"
+    )
+
+    # 4. Backup — 6:04 UTC
+    job_queue.run_daily(
+        callback=auto_backup_job,
+        time=time(hour=6, minute=4),
+        days=BACKUP_DAYS,
+        name="daily_backup"
+    )
+
+    # Перша перевірка зараз (для тесту)
+    job_queue.run_once(
+        callback=daily_reminders_job,
+        when=0,
+        name="initial_check"
+    )
+
+    logger.info("✅ Система нагадувань налаштована:")
+    logger.info("   • Місячний звіт 1-го числа о 6:01 UTC")
+    logger.info("   • Тижневий звіт щопонеділка о 6:02 UTC")
+    logger.info("   • Щоденні нагадування о 6:03 UTC")
+    logger.info("   • Backup о 6:04 UTC")
+
+
+# Job-обгортки з обробкою помилок
+async def daily_reminders_job(context):
+    """Job для щоденних нагадувань"""
+    try:
+        await check_and_send_reminders(context)
+    except Exception as e:
+        logger.error(f"❌ Помилка в daily_reminders_job: {e}")
+
+
+async def weekly_report_job(context):
+    """Job для тижневого звіту"""
+    try:
+        await send_weekly_report(context)
+    except Exception as e:
+        logger.error(f"❌ Помилка в weekly_report_job: {e}")
+
+
+async def monthly_report_job(context):
+    """Job для місячного звіту"""
+    try:
+        await send_monthly_report(context)
+    except Exception as e:
+        logger.error(f"❌ Помилка в monthly_report_job: {e}")
+</file>
+
+<file path="requirements.txt">
+python-telegram-bot[rate-limiter]>=20.0
+python-dotenv>=0.19.0
+dateparser>=1.1.0
+</file>
+
+<file path="test_imports.py">
+import sys
+import traceback
+
+print("🔄 Починаємо діагностику...")
+
+try:
+    print("1️⃣ Імпорт config...")
+    from config import BOT_TOKEN, ACCESS_PASSWORD
+    print(f"   ✅ BOT_TOKEN: {BOT_TOKEN[:20]}...")
+
+    print("2️⃣ Імпорт database...")
+    from database import init_db, add_user, authorize_user, is_user_authorized
+    print("   ✅ database OK")
+
+    print("3️⃣ Імпорт utils...")
+    from utils import parse_date_input, format_date, get_week_dates
+    print("   ✅ utils OK")
+
+    print("4️⃣ Імпорт handlers.reminders...")
+    from handlers.reminders import add_reminder_conv
+    print("   ✅ reminders OK")
+
+    print("5️⃣ Імпорт handlers.list...")
+    from handlers.list import list_handlers, list_all
+    print("   ✅ list OK")
+
+    print("6️⃣ Імпорт telegram...")
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    print("   ✅ telegram OK")
+
+    print("7️⃣ Імпорт telegram.ext...")
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        ContextTypes,
+        ConversationHandler,
+        MessageHandler,
+        CallbackQueryHandler,
+        filters,
+    )
+    print("   ✅ telegram.ext OK")
+
+    print("\n✅ Всі імпорти успішні!")
+    print("🚀 Можна запускати main.py")
+
+except Exception as e:
+    print(f"\n❌ ПОМИЛКА: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+</file>
+
+<file path="test_natural_language.py">
+#!/usr/bin/env python3
+# test_natural_language.py - Тестування парсингу природної мови
+
+from utils import parse_natural_date, looks_like_reminder, parse_date_input, format_date
+from datetime import date, timedelta
+
+
+def test_case(description, input_text, expected_date=None, expected_text=""):
+    """Допоміжна функція для тестування"""
+    print(f"\n📝 Тест: {description}")
+    print(f"   Ввід: '{input_text}'")
+
+    date_obj, text = parse_date_input(input_text)
+
+    if date_obj:
+        print(f"   ✅ Дата: {format_date(date_obj)}")
+        print(f"   📝 Текст: '{text}'")
+
+        if expected_date:
+            if date_obj == expected_date:
+                print("   🎯 Дата вірна!")
+            else:
+                print(f"   ⚠️ Очікувалось: {format_date(expected_date)}")
+    else:
+        print("   ❌ Дату не розпізнано")
+
+    is_reminder = looks_like_reminder(input_text)
+    print(f"   🔍 looks_like_reminder: {is_reminder}")
+
+
+def main():
+    print("=" * 50)
+    print("ТЕСТУВАННЯ NATURAL LANGUAGE ПАРСИНГУ")
+    print("=" * 50)
+
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    day_after = today + timedelta(days=2)
+    in_3_days = today + timedelta(days=3)
+
+    # Тести
+    test_case("Завтра", "завтра тест", tomorrow, "тест")
+    test_case("Післязавтра", "післязавтра зустріч", day_after, "зустріч")
+    test_case("Через 3 дні", "через 3 дні подорож", in_3_days, "подорож")
+    test_case("Через три дні (словами)", "через три дні подорож", in_3_days, "подорож")
+    test_case("15 травня", "15 травня день народження", None, "день народження")
+    test_case("Класичний формат", "15.05 Оплатити інтернет", None, "Оплатити інтернет")
+    test_case("З роком", "15.05.2026 Зустріч з лікарем", date(2026, 5, 15), "Зустріч з лікарем")
+    test_case("Просто текст", "привіт як справи", None, "")
+
+    print("\n" + "=" * 50)
+    print("Тестування завершено!")
+    print("=" * 50)
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="utils.py">
+# utils.py - Допоміжні функції (ОНОВЛЕНО з natural language)
+
+import re
+from datetime import datetime, date, timedelta
+from calendar import monthrange
+
+# ============ АНТИСПАМ ДЛЯ КНОПОК ============
+
+from datetime import datetime, timedelta
+
+# Словник: user_id -> {callback_name: last_time}
+_user_cooldown = {}
+
+
+def check_cooldown(user_id: int, action: str, cooldown_seconds: int = 2) -> bool:
+    """
+    Перевіряє чи користувач не спамить однією кнопкою
+    Повертає True якщо ДОЗВОЛЕНО, False якщо СПАМ
+    """
+    now = datetime.now()
+
+    if user_id not in _user_cooldown:
+        _user_cooldown[user_id] = {}
+
+    last_time = _user_cooldown[user_id].get(action)
+
+    if last_time and (now - last_time).total_seconds() < cooldown_seconds:
+        return False  # Спам! Заборонено
+
+    _user_cooldown[user_id][action] = now
+    return True  # Дозволено
+
+
+def clear_old_cooldowns(max_age_minutes: int = 10):
+    """Очищає старі записи кулдауну щоб не засмічувати пам'ять"""
+    now = datetime.now()
+    to_remove_users = []
+
+    for user_id, actions in _user_cooldown.items():
+        to_remove_actions = []
+        for action, last_time in actions.items():
+            if (now - last_time).total_seconds() > max_age_minutes * 60:
+                to_remove_actions.append(action)
+
+        for action in to_remove_actions:
+            del actions[action]
+
+        if not actions:
+            to_remove_users.append(user_id)
+
+    for user_id in to_remove_users:
+        del _user_cooldown[user_id]
+
+# Словник українських чисел для заміни слів на цифри
+UKRAINIAN_NUMBERS = {
+    "один": 1, "одна": 1, "одне": 1,
+    "два": 2, "дві": 2,
+    "три": 3,
+    "чотири": 4,
+    "п'ять": 5, "пять": 5,
+    "шість": 6,
+    "сім": 7,
+    "вісім": 8,
+    "дев'ять": 9, "девять": 9,
+    "десять": 10,
+    "одинадцять": 11,
+    "дванадцять": 12,
+    "тринадцять": 13,
+    "чотирнадцять": 14,
+    "п'ятнадцять": 15, "пятнадцять": 15,
+    "шістнадцять": 16,
+    "сімнадцять": 17,
+    "вісімнадцять": 18,
+    "дев'ятнадцять": 19, "девятнадцять": 19,
+    "двадцять": 20,
+    "тридцять": 30,
+}
+
+# Словник місяців
+UKRAINIAN_MONTHS = {
+    "січня": 1, "січень": 1,
+    "лютого": 2, "лютий": 2,
+    "березня": 3, "березень": 3,
+    "квітня": 4, "квітень": 4,
+    "травня": 5, "травень": 5,
+    "червня": 6, "червень": 6,
+    "липня": 7, "липень": 7,
+    "серпня": 8, "серпень": 8,
+    "вересня": 9, "вересень": 9,
+    "жовтня": 10, "жовтень": 10,
+    "листопада": 11, "листопад": 11,
+    "грудня": 12, "грудень": 12,
+}
+
+# Словник днів тижня
+UKRAINIAN_WEEKDAYS = {
+    "понеділок": 0,
+    "вівторок": 1,
+    "середа": 2,
+    "четвер": 3,
+    "п'ятниця": 4, "пятниця": 4,
+    "субота": 5,
+    "неділя": 6,
+}
+
+
+def replace_words_with_numbers(text: str) -> str:
+    """Замінює українські числа словами на цифри"""
+    result = text.lower()
+    for word, number in UKRAINIAN_NUMBERS.items():
+        result = re.sub(rf"\b{re.escape(word)}\b", str(number), result)
+    return result
+
+
+def parse_relative_days(text: str):
+    """
+    Парсинг відносних дат: "через N днів", "за 3 дні", "через три дні"
+    """
+    patterns = [
+        r"через\s+(\d+)\s+д(ень|ні|нів|ня)(?:\s+)?(.*)?",
+        r"за\s+(\d+)\s+д(ень|ні|нів|ня)(?:\s+)?(.*)?",
+    ]
+
+    text_processed = replace_words_with_numbers(text.lower().strip())
+
+    for pattern in patterns:
+        match = re.match(pattern, text_processed)
+        if match:
+            days = int(match.group(1))
+            remaining = match.group(3) if match.group(3) else ""
+            target_date = date.today() + timedelta(days=days)
+            return target_date, remaining.strip()
+
+    return None, None
+
+
+def parse_tomorrow(text: str):
+    """Парсинг 'завтра' та 'післязавтра'"""
+    text_lower = text.lower().strip()
+
+    # Завтра
+    match = re.match(r"завтра(?:\s+)?(.*)?", text_lower)
+    if match:
+        target_date = date.today() + timedelta(days=1)
+        remaining = match.group(1) if match.group(1) else ""
+        return target_date, remaining.strip()
+
+    # Післязавтра
+    match = re.match(r"післязавтра(?:\s+)?(.*)?", text_lower)
+    if match:
+        target_date = date.today() + timedelta(days=2)
+        remaining = match.group(1) if match.group(1) else ""
+        return target_date, remaining.strip()
+
+    return None, None
+
+
+def parse_weekday(text: str):
+    """
+    Парсинг 'наступний понеділок', 'у вівторок', 'в суботу'
+    """
+    text_lower = text.lower().strip()
+
+    # Патерни для днів тижня
+    patterns = [
+        r"наступний\s+(\w+)(?:\s+)?(.*)?",
+        r"у\s+(\w+)(?:\s+)?(.*)?",
+        r"в\s+(\w+)(?:\s+)?(.*)?",
+        r"цього\s+(\w+)(?:\s+)?(.*)?",
+    ]
+
+    for pattern in patterns:
+        match = re.match(pattern, text_lower)
+        if match:
+            day_word = match.group(1)
+            remaining = match.group(2) if match.group(2) else ""
+
+            # Перевіряємо чи це день тижня
+            for weekday_name, weekday_num in UKRAINIAN_WEEKDAYS.items():
+                if day_word == weekday_name:
+                    today = date.today()
+                    days_ahead = weekday_num - today.weekday()
+
+                    if days_ahead <= 0:  # Цей день вже був цього тижня
+                        days_ahead += 7
+
+                    target_date = today + timedelta(days=days_ahead)
+                    return target_date, remaining.strip()
+
+    return None, None
+
+
+def parse_month_day(text: str):
+    """
+    Парсинг '15 травня', '1 січня', '3 березня день народження'
+    """
+    text_lower = text.lower().strip()
+
+    # Патерн: число + місяць
+    month_names = "|".join(re.escape(m) for m in UKRAINIAN_MONTHS.keys())
+    pattern = rf"^(\d{{1,2}})\s+({month_names})(?:\s+)?(.*)?$"
+
+    match = re.match(pattern, text_lower)
+    if match:
+        day = int(match.group(1))
+        month_word = match.group(2)
+        remaining = match.group(3) if match.group(3) else ""
+
+        month = UKRAINIAN_MONTHS.get(month_word)
+        if month and 1 <= day <= 31:
+            today = date.today()
+            year = today.year
+
+            # Якщо дата вже пройшла цього року — беремо наступний рік
+            try:
+                target_date = date(year, month, day)
+                if target_date < today:
+                    target_date = date(year + 1, month, day)
+                return target_date, remaining.strip()
+            except ValueError:
+                # Неправильна дата (наприклад 31 лютого)
+                pass
+
+    return None, None
+
+
+def parse_natural_date(text: str):
+    """
+    Головна функція парсингу природної мови
+    Спробує всі методи по черзі
+    """
+    text = text.strip()
+
+    # 1. Спробуємо "завтра", "післязавтра"
+    result = parse_tomorrow(text)
+    if result[0]:
+        return result
+
+    # 2. Спробуємо "через N днів"
+    result = parse_relative_days(text)
+    if result[0]:
+        return result
+
+    # 3. Спробуємо день тижня
+    result = parse_weekday(text)
+    if result[0]:
+        return result
+
+    # 4. Спробуємо "15 травня"
+    result = parse_month_day(text)
+    if result[0]:
+        return result
+
+    return None, None
+
+
+def looks_like_reminder(text: str) -> bool:
+    """
+    Перевіряє чи текст схожий на нагадування
+    """
+    text_lower = text.lower().strip()
+
+    # Якщо це команда — не нагадування
+    if text.startswith("/"):
+        return False
+
+    # Ключові слова дат
+    date_keywords = [
+        "завтра", "післязавтра", "сьогодні",
+        "понеділок", "вівторок", "середа", "четвер",
+        "п'ятниця", "пятниця", "субота", "неділя",
+        "січня", "лютого", "березня", "квітня", "травня", "червня",
+        "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
+        "через", "за", "наступний", "у ", "в ",
+    ]
+
+    # Перевіряємо ключові слова
+    has_keyword = any(keyword in text_lower for keyword in date_keywords)
+
+    # Перевіряємо числа
+    has_numbers = bool(re.search(r"\d+", text))
+
+    # Класичний формат ДД.ММ
+    has_classic_format = bool(re.match(r"^\d{1,2}[./]\d{1,2}", text))
+
+    return has_keyword or has_numbers or has_classic_format
+
+
+def parse_date_input(text: str):
+    """
+    Головна функція парсингу дати
+    Підтримує natural language та класичний формат
+    """
+    text = text.strip()
+
+    # СПОЧАТКУ пробуємо natural language
+    nat_date, nat_text = parse_natural_date(text)
+    if nat_date:
+        return nat_date, nat_text
+
+    # Fallback на класичний формат
+
+    # Формат: ДД.ММ.РРРР
+    pattern1 = r"^(\d{1,2})\.(\d{1,2})\.(\d{4})\s*(.*)$"
+    match = re.match(pattern1, text)
+
+    if match:
+        day, month, year, remaining = match.groups()
+        try:
+            date_obj = date(int(year), int(month), int(day))
+            return date_obj, remaining.strip()
+        except ValueError:
+            return None, None
+
+    # Формат: ДД.ММ (поточний рік)
+    pattern2 = r"^(\d{1,2})\.(\d{1,2})\s*(.*)$"
+    match = re.match(pattern2, text)
+
+    if match:
+        day, month, remaining = match.groups()
+        current_year = datetime.now().year
+        try:
+            date_obj = date(current_year, int(month), int(day))
+            return date_obj, remaining.strip()
+        except ValueError:
+            return None, None
+
+    return None, None
+
+
+# ============ Існуючі функції (без змін) ============
+
+def get_next_month_date(current_date: date, original_day: int = None):
+    """Отримання дати наступного місяця для щомісячних нагадувань"""
+    if current_date.month == 12:
+        next_year = current_date.year + 1
+        next_month = 1
+    else:
+        next_year = current_date.year
+        next_month = current_date.month + 1
+
+    days_in_next = monthrange(next_year, next_month)[1]
+
+    if original_day:
+        day = min(original_day, days_in_next)
+    else:
+        day = min(current_date.day, days_in_next)
+
+    return date(next_year, next_month, day)
+
+
+def get_next_year_date(current_date: date):
+    """Отримання дати наступного року для щорічних нагадувань"""
+    next_year = current_date.year + 1
+
+    if current_date.month == 2 and current_date.day == 29:
+        try:
+            return date(next_year, 2, 29)
+        except ValueError:
+            return date(next_year, 2, 28)
+
+    return date(next_year, current_date.month, current_date.day)
+
+
+def format_date(date_obj: date) -> str:
+    """Форматування дати українською"""
+    months = {
+        1: "січня", 2: "лютого", 3: "березня", 4: "квітня",
+        5: "травня", 6: "червня", 7: "липня", 8: "серпня",
+        9: "вересня", 10: "жовтня", 11: "листопада", 12: "грудня"
+    }
+    return f"{date_obj.day} {months[date_obj.month]} {date_obj.year}"
+
+
+def get_week_dates(date_obj: date):
+    """Отримання дат тижня (понеділок-неділя)"""
+    monday = date_obj - timedelta(days=date_obj.weekday())
+    week_dates = [monday + timedelta(days=i) for i in range(7)]
+    return week_dates
+
+
+def get_next_monday(current_date: date):
+    """Отримання дати наступного понеділка"""
+    days_until_monday = 7 - current_date.weekday()
+    if days_until_monday == 0:
+        days_until_monday = 7
+    return current_date + timedelta(days=days_until_monday)
+
+
+def get_next_month_first_day(current_date: date):
+    """Отримання першого числа наступного місяця"""
+    if current_date.month == 12:
+        return date(current_date.year + 1, 1, 1)
+    else:
+        return date(current_date.year, current_date.month + 1, 1)
+</file>
+
+</files>
