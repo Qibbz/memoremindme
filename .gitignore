@@ -1,8 +1,9 @@
 # Секретні дані
 .env
 
-# База даних
+# База даних та backup
 *.db
+memoremindme_backup_*.db
 
 # Python кеш
 __pycache__/
